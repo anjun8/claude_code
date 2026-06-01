@@ -1,0 +1,4 @@
+pykrx>=1.2.8
+pandas>=2.0
+# 선택: .env 파일 자동 로드 (없어도 내장 로더로 동작)
+python-dotenv>=1.0

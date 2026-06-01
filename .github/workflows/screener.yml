@@ -1,0 +1,43 @@
+name: 급등 스크리너
+
+# 한국 정규장 마감(15:30 KST) 이후 평일 16:10 KST 실행
+# 16:10 KST = 07:10 UTC. (GitHub Actions cron은 수 분 지연될 수 있음)
+on:
+  schedule:
+    - cron: "10 7 * * 1-5"
+  workflow_dispatch:        # 수동 실행 허용
+    inputs:
+      date:
+        description: "대상일 YYYY-MM-DD (비우면 직전 영업일)"
+        required: false
+        default: ""
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 스크리너 실행
+        env:
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: |
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python -m screener.cli --date "${{ github.event.inputs.date }}"
+          else
+            python -m screener.cli
+          fi
