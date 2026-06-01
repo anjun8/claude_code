@@ -49,9 +49,11 @@ def run(args: argparse.Namespace) -> int:
     picks = build_picks(universe, filtered, cfg)
 
     if not args.no_trend and picks:
+        print(f"[screener] 3개월 추세 계산 중... ({len(picks)}개 종목, 잠시 걸려요)")
         enrich_trends(picks, trend_provider)
 
     if not args.no_news and picks:
+        print("[screener] 뉴스 헤드라인 조회 중...")
         for p in picks:
             p.news_headline = news_fn(p.name)
 
