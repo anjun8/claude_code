@@ -44,7 +44,10 @@ def fetch_market(date: str, market: str) -> pd.DataFrame:
             f"{market} 업종 데이터가 비어 있습니다. KRX_ID/KRX_PW 설정 또는 "
             f"네트워크/영업일({date})을 확인하세요."
         )
-    sector = sector.set_index("종목코드")
+    # pykrx 버전에 따라 종목코드가 컬럼일 수도, 이미 인덱스일 수도 있다.
+    if "종목코드" in sector.columns:
+        sector = sector.set_index("종목코드")
+    sector.index = sector.index.astype(str)
     return assemble_universe(ohlcv, cap, sector, market)
 
 
