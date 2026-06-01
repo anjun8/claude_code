@@ -57,15 +57,18 @@
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # 값 채우기
 
-# 네트워크 없이 로직만 확인 (합성 데이터)
+# 0) 자격증명 없이 동작 확인 (합성 데이터, 네트워크 X) ← 설치 직후 스모크 테스트
+python -m screener.cli --demo --dry-run
+
+# 1) 단위 테스트
 python -m pytest -q
 
-# 실데이터로 콘솔 출력만 (전송 X)
+# 2) 자격증명 세팅 후 실데이터로 콘솔 출력만 (전송 X)
+cp .env.example .env        # KRX_ID/PW 등 값 채우기
 python -m screener.cli --dry-run
 
-# 특정일 + 텔레그램 전송
+# 3) 특정일 + 텔레그램 전송
 python -m screener.cli --date 2026-04-08
 ```
 
@@ -73,6 +76,7 @@ python -m screener.cli --date 2026-04-08
 
 | 플래그 | 설명 |
 |--------|------|
+| `--demo` | 네트워크/자격증명 없이 합성 데이터로 실행 (스모크 테스트) |
 | `--date YYYY-MM-DD` | 대상일 지정 (기본: 직전 영업일) |
 | `--dry-run` | 전송하지 않고 콘솔 출력 |
 | `--no-trend` | 3개월 추세 계산 생략 (빠름) |

@@ -19,14 +19,28 @@ from .screen import analyze, build_picks, enrich_trends, filter_universe
 
 def run(args: argparse.Namespace) -> int:
     cfg = ScreenConfig.from_env()
-    # datasource는 pykrx 의존이므로 실제 실행 시점에만 import
-    from . import datasource
 
-    date = datasource.resolve_date(args.date)
-    pretty_date = f"{date[:4]}-{date[4:6]}-{date[6:]}"
-    print(f"[screener] 대상 영업일: {pretty_date}")
+    if args.demo:
+        # 네트워크/자격증명 없이 합성 데이터로 전체 파이프라인 확인
+        from . import demo
 
-    universe = datasource.fetch_universe(date)
+        date = "20260408"
+        pretty_date = "2026-04-08"
+        print("[screener] --demo: 합성 데이터로 실행 (네트워크 미사용)")
+        universe = demo.demo_universe()
+        trend_provider = demo.demo_trend_provider
+        news_fn = demo.demo_news
+    else:
+        # datasource는 pykrx 의존이므로 실제 실행 시점에만 import
+        from . import datasource
+
+        date = datasource.resolve_date(args.date)
+        pretty_date = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+        print(f"[screener] 대상 영업일: {pretty_date}")
+        universe = datasource.fetch_universe(date)
+        trend_provider = datasource.make_trend_provider(date, cfg)
+        news_fn = fetch_headline
+
     print(f"[screener] universe 종목 수: {len(universe)}")
 
     filtered = filter_universe(universe, cfg)
@@ -35,12 +49,11 @@ def run(args: argparse.Namespace) -> int:
     picks = build_picks(universe, filtered, cfg)
 
     if not args.no_trend and picks:
-        provider = datasource.make_trend_provider(date, cfg)
-        enrich_trends(picks, provider)
+        enrich_trends(picks, trend_provider)
 
     if not args.no_news and picks:
         for p in picks:
-            p.news_headline = fetch_headline(p.name)
+            p.news_headline = news_fn(p.name)
 
     hl = analyze(universe, picks, cfg)
     message = format_message(pretty_date, picks, hl, cfg)
@@ -65,6 +78,11 @@ def run(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="KOSPI/KOSDAQ 급등 거래대금 스크리너")
     parser.add_argument("--date", help="대상일 YYYY-MM-DD (기본: 직전 영업일)")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="네트워크/자격증명 없이 합성 데이터로 실행 (스모크 테스트)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="전송 없이 콘솔 출력")
     parser.add_argument("--no-trend", action="store_true", help="3개월 추세 계산 생략")
     parser.add_argument("--no-news", action="store_true", help="뉴스 헤드라인 생략")
