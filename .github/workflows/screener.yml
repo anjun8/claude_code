@@ -2,6 +2,7 @@ name: 급등 스크리너
 
 # 한국 정규장 마감(15:30 KST) 이후 평일 16:10 KST 실행
 # 16:10 KST = 07:10 UTC. (GitHub Actions cron은 수 분 지연될 수 있음)
+# (GitHub Actions 워크플로우 재등록을 위해 갱신)
 on:
   schedule:
     - cron: "10 7 * * 1-5"
