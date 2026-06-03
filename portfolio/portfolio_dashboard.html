@@ -73,7 +73,7 @@ const fmtP=(c,v)=>c==="KRW"?(+v).toLocaleString():(c==="USD"?"$":"NT$")+(+v).toF
 
 function compute(){
   const sel=S.account||"";
-  const src=sel?S.rows.filter(x=>(x.account||"기본")===sel):S.rows;
+  const src=(sel?S.rows.filter(x=>(x.account||"기본")===sel):S.rows).filter(x=>(+x.qty||0)>0);
   const r=src.map(raw=>{
     const s=Object.assign({},raw,{qty:+raw.qty||0,avg:+raw.avg||0,price:+raw.price||0,prev:+raw.prev||+raw.price||0});
     const k=rate(s.cur), priceK=s.price*k, avgK=s.avg*k, prevK=s.prev*k;
@@ -247,6 +247,7 @@ function render(){
       <input id="nPrice" placeholder="현재가" style="width:92px;text-align:right">
       <input id="nTarget" placeholder="목표%" style="width:62px;text-align:right">
       <button class="btn p" id="addBtn">+ 추가</button>
+      <button class="btn" id="rebuildBtn" title="가져온 거래내역(매수-매도)을 합쳐 현재 보유 종목·평단가를 다시 계산합니다. 잔고 CSV가 없어도 됩니다.">거래내역으로 보유 계산</button>
     </div>
     <div style="overflow-x:auto"><table style="min-width:980px"><thead><tr>
       ${["종목","현재가","등락","수량","평균단가","평가금액","평가손익","수익률","추이","52주","보유일","매도시 실손익",""].map((h,i)=>`<th style="text-align:${i===0?'left':'right'}">${h}</th>`).join("")}
@@ -507,6 +508,32 @@ function realizedFromLog(acct){
   if(!acct)(S.trades||[]).forEach(x=>realized+=(+x.qty)*((+x.sell)-(+x.buy)));
   return realized;
 }
+// 거래내역(txlog)만으로 현재 보유 종목·평단가를 재구성 (잔고 CSV 불필요)
+function rebuildFromTx(){
+  const log=(S.txlog||[]).slice().sort((a,b)=>a.date<b.date?-1:1);
+  if(!log.length){alert("거래내역이 없어요.\n먼저 '거래내역 CSV 가져오기'로 매매내역을 가져온 뒤 눌러주세요.");return;}
+  if(!confirm("가져온 거래내역으로 현재 보유 종목을 다시 계산할까요?\n\n· 기존 보유 목록은 대체됩니다\n· 다 팔린 종목은 자동으로 빠져요\n· 계산 후 '↻ 시세 새로고침'을 누르면 현재가가 채워집니다"))return;
+  const pSec={},pTgt={}; S.rows.forEach(r=>{if(r.sector)pSec[r.code]=r.sector;if(r.target)pTgt[r.code]=r.target;});
+  const pos={};
+  log.forEach(t=>{
+    const acct=t.account||"기본", key=acct+"|"+t.code;
+    const p=pos[key]||(pos[key]={code:t.code,account:acct,name:t.name||t.code,qty:0,cost:0});
+    if(t.name)p.name=t.name;
+    if(t.type==="매수"){p.qty+=(+t.qty||0); p.cost+=(+t.qty||0)*(+t.price||0)+(+t.fee||0);}
+    else{const avg=p.qty?p.cost/p.qty:0; p.cost-=avg*(+t.qty||0); p.qty-=(+t.qty||0);}
+  });
+  const out=Object.values(pos).filter(p=>p.qty>1e-6).map(p=>{
+    const avg=Math.round(p.cost/p.qty), price=avg;
+    return {name:p.name,code:p.code,account:p.account,sector:pSec[p.code]||"기타",
+      market:/^\d{6}$/.test(p.code)?"국내":"해외",cur:"KRW",
+      qty:Math.round(p.qty*1e4)/1e4,avg,price,prev:price,
+      hi52:Math.round(price*1.3),lo52:Math.round(price*0.7),date:"2024-01-01",target:pTgt[p.code]||0};
+  });
+  if(!out.length){alert("거래내역상 현재 보유 중인 종목이 없어요. (전부 매도된 상태)");return;}
+  S.rows=out; save(); render();
+  const accts=[...new Set(out.map(r=>r.account))].join(", ");
+  alert(out.length+"개 종목을 거래내역으로 계산했어요. (계좌: "+accts+")\n'↻ 시세 새로고침'을 누르면 현재가가 채워집니다.\n※ 평단가는 가져온 거래내역 범위 안에서만 정확해요.");
+}
 function onJson(file){const rd=new FileReader();rd.onload=()=>{try{const s=JSON.parse(rd.result);S=Object.assign({},DEFAULT,s);save();render();}catch(e){alert("백업 파일을 읽을 수 없습니다.");}};rd.readAsText(file);}
 
 /* 이벤트 위임 (#app은 재렌더돼도 유지됨) */
@@ -530,6 +557,7 @@ app.addEventListener("click",e=>{const t=e.target;
   else if(t.dataset.period){S.period=t.dataset.period;save();render();}
   else if(t.dataset.acct!==undefined){S.account=t.dataset.acct==="__ALL__"?"":t.dataset.acct;save();render();}
   else if(t.id==="addBtn")addRow();
+  else if(t.id==="rebuildBtn")rebuildFromTx();
   else if(t.id==="tradeBtn")addTrade();
   else if(t.id==="refreshBtn")refreshPrices();
   else if(t.id==="tmplBtn")tmpl();
