@@ -30,6 +30,7 @@
   tr:last-child td{border-bottom:none}
   .cellin{width:80px;text-align:right;background:transparent;border:1px solid transparent;padding:4px 5px}
   .cellin:focus{border:1px solid var(--gold)}
+  .celltext:focus{border:1px solid var(--gold)!important;color:var(--text)!important}
   .bar{height:7px;background:var(--panel2);border-radius:6px;overflow:hidden}
   .bar>div{height:100%;border-radius:6px}
   .pchip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);margin:3px 12px 3px 0}
@@ -91,7 +92,7 @@ function compute(){
     const evalAmt=s.qty*priceK, cost=s.qty*avgK, pl=evalAmt-cost;
     const plPct=avgK?(priceK/avgK-1)*100:0;
     const dayChg=s.prev?(s.price-s.prev)/s.prev*100:0, dayPl=s.qty*(priceK-prevK);
-    const days=Math.max(0,Math.round((Date.now()-new Date(s.date))/864e5));
+    const days=s.date&&!isNaN(new Date(s.date))?Math.max(0,Math.round((Date.now()-new Date(s.date))/864e5)):0;
     const range=s.hi52-s.lo52, pos52=range?((s.price-s.lo52)/range)*100:50;
     const fee=evalAmt*0.00015, tax=s.market==="국내"?evalAmt*0.0018:0;
     return Object.assign(s,{priceK,evalAmt,cost,pl,plPct,dayChg,dayPl,days,pos52:Math.max(0,Math.min(100,pos52)),netIfSold:pl-fee-tax});
@@ -122,9 +123,12 @@ function donut(items){ // items:[{label,value,color}]
   });
   return `<svg viewBox="0 0 200 200" width="100%" height="200">${p}</svg>`;
 }
-function spark(base,up){let v=base*(0.95+Math.random()*0.03);const a=[];for(let i=0;i<20;i++){v*=1+(Math.random()-0.48)*0.012;a.push(v);}a[19]=base;
+function spark(arr){   // 실제 한달 일별 종가 배열로 그림
+  const a=Array.isArray(arr)?arr.map(Number).filter(v=>v>0):[];
+  if(a.length<2) return `<span style="color:var(--faint);font-size:11px">—</span>`;
   const mn=Math.min(...a),mx=Math.max(...a),w=64,h=26;
-  const pts=a.map((x,i)=>`${i/19*w},${h-(x-mn)/(mx-mn||1)*h}`).join(" ");
+  const pts=a.map((x,i)=>`${(i/(a.length-1)*w).toFixed(1)},${(h-(x-mn)/(mx-mn||1)*h).toFixed(1)}`).join(" ");
+  const up=a[a.length-1]>=a[0];
   return `<svg width="${w}" height="${h}"><polyline points="${pts}" fill="none" stroke="${up?'var(--up)':'var(--down)'}" stroke-width="1.5"/></svg>`;}
 function recordHistory(asset,kospi,kosdaq){
   const d=new Date().toISOString().slice(0,10);
@@ -208,21 +212,13 @@ function retChartHTML(){
   const legend=lines.map(l=>{const last=[...l.ret].reverse().find(v=>v!=null); return `<span class="pchip"><i style="background:${l.col}"></i>${l.name} <b class="mono" style="color:${last>=0?'var(--up)':'var(--down)'}">${last==null?'-':pct(last)}</b></span>`;}).join("");
   return svg+`<div style="margin-top:6px">${legend}</div>`;
 }
-function benchData(){
+function benchData(){   // 올해 YTD. 내 포트는 입출금 영향을 뺀 원금대비 수익률(TWR)
   const ys=new Date(new Date().getFullYear(),0,1).toISOString().slice(0,10);
-  const h=(S.history||[]).filter(x=>x.d>=ys).sort((a,b)=>a.d<b.d?-1:1);
+  const h=twrIndex().filter(x=>x.d>=ys);
   const out=[];
-  if(h.length>=2&&h[0].asset) out.push({name:"내 포트",v:(h[h.length-1].asset/h[0].asset-1)*100,me:1});
-  else out.push({name:"내 포트",v:null,me:1});
-  const hk=h.filter(x=>x.kospi);
-  if(hk.length>=2) out.push({name:"코스피(종합)",v:(hk[hk.length-1].kospi/hk[0].kospi-1)*100});
-  else out.push({name:"코스피(종합)",v:null});
-  const hq=h.filter(x=>x.kosdaq);
-  if(hq.length>=2) out.push({name:"코스닥",v:(hq[hq.length-1].kosdaq/hq[0].kosdaq-1)*100});
-  else out.push({name:"코스닥",v:null});
-  const hs=h.filter(x=>x.spx);
-  if(hs.length>=2) out.push({name:"S&P 500",v:(hs[hs.length-1].spx/hs[0].spx-1)*100});      // 자동(시세 재구성)
-  else out.push({name:"S&P 500",v:(S.spxYtd!==""&&!isNaN(+S.spxYtd))?+S.spxYtd:null});       // 없으면 수동 입력값
+  out.push({name:"내 포트",v:(h.length>=2&&h[0].twr)?(h[h.length-1].twr/h[0].twr-1)*100:null,me:1});
+  const ch=(key,nm)=>{const f=h.filter(x=>x[key]); out.push({name:nm,v:f.length>=2?(f[f.length-1][key]/f[0][key]-1)*100:null});};
+  ch("kospi","코스피"); ch("kosdaq","코스닥"); ch("spx","S&P 500");
   return out;
 }
 
@@ -344,7 +340,8 @@ function render(){
       ${["종목","현재가","등락","수량","평균단가","평가금액","평가손익","수익률","추이","52주","보유일","매도시 실손익",""].map((h,i)=>`<th style="text-align:${i===0?'left':'right'}">${h}</th>`).join("")}
     </tr></thead><tbody>
       ${d.r.map(s=>`<tr>
-        <td style="text-align:left"><div style="font-weight:600">${s.name}</div><div style="font-size:11px;color:var(--faint)">${s.code} · ${s.market}</div></td>
+        <td style="text-align:left"><div style="font-weight:600">${s.name}</div><div style="font-size:11px;color:var(--faint)">${s.code} · ${s.market}</div>
+          <input class="celltext" data-code="${s.code}" data-field="sector" value="${String(s.sector||'기타').replace(/"/g,'&quot;')}" title="클릭해서 섹터 수정" style="font-size:10px;color:var(--gold);background:transparent;border:1px solid transparent;border-radius:4px;width:110px;padding:1px 3px;font-family:'Pretendard'"></td>
         <td style="text-align:right"><input class="cellin mono" data-code="${s.code}" data-field="price" value="${s.price}"></td>
         <td class="mono" style="text-align:right;color:${ud(s.dayChg)}">${pct(s.dayChg)}</td>
         <td style="text-align:right"><input class="cellin mono" data-code="${s.code}" data-field="qty" value="${s.qty}"></td>
@@ -352,9 +349,9 @@ function render(){
         <td class="mono" style="text-align:right">${won(s.evalAmt)}</td>
         <td class="mono" style="text-align:right;color:${ud(s.pl)}">${won(s.pl)}</td>
         <td class="mono" style="text-align:right;color:${ud(s.plPct)};font-weight:600">${pct(s.plPct)}</td>
-        <td style="text-align:center">${spark(s.price,s.pl>=0)}</td>
+        <td style="text-align:center">${spark(s.hist)}</td>
         <td style="text-align:right"><div class="bar" style="width:80px;margin-left:auto;position:relative;height:5px"><div style="position:absolute;left:${s.pos52}%;top:-2px;width:9px;height:9px;border-radius:50%;background:var(--gold);transform:translateX(-50%)"></div></div><div style="font-size:10px;color:var(--faint);text-align:right;margin-top:3px">${s.pos52.toFixed(0)}%</div></td>
-        <td class="mono" style="text-align:right;color:var(--muted)">${s.days}일</td>
+        <td class="mono" style="text-align:right;color:var(--muted)">${s.days?s.days+"일":"—"}</td>
         <td class="mono" style="text-align:right;color:${ud(s.netIfSold)};font-size:12px">${won(s.netIfSold)}</td>
         <td style="text-align:center"><button class="delx" data-del="${s.code}">×</button></td>
       </tr>`).join("")}
@@ -412,13 +409,11 @@ function render(){
     <div class="card"><div class="lbl">벤치마크 비교 (올해 YTD 수익률)</div>
       <div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
       ${benchData().map(b=>{
-        if(b.v===null) return `<div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><span>${b.name}</span><span style="color:var(--faint);font-size:12px">${b.name==="S&P 500"?'아래 칸에 입력':'기록 누적 중'}</span></div><div class="bar" style="height:12px"></div></div>`;
+        if(b.v===null) return `<div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><span>${b.name}</span><span style="color:var(--faint);font-size:12px">기록 누적 중</span></div><div class="bar" style="height:12px"></div></div>`;
         const mx=Math.max(12,...benchData().filter(x=>x.v!==null).map(x=>Math.abs(x.v)));
         return `<div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><span>${b.name}</span><span class="mono" style="color:${ud(b.v)}">${pct(b.v)}</span></div><div class="bar" style="height:12px"><div style="width:${Math.min(Math.abs(b.v)/mx*100,100)}%;background:${b.me?'var(--gold)':'var(--faint)'}"></div></div></div>`;
       }).join("")}
       </div>
-      <div style="margin-top:12px;font-size:11px;color:var(--faint);display:flex;align-items:center;gap:8px">S&P500 YTD 직접 입력:<input id="spxYtd" style="width:70px;text-align:right" value="${S.spxYtd}" placeholder="%"> %</div>
-      <div style="font-size:11px;color:var(--faint);margin-top:6px">* 내 포트·코스피는 올해 첫 기록 대비로 계산돼요. 연초부터 기록이 쌓일수록 정확해집니다.</div>
     </div>
     <div class="card"><div class="lbl">매매일지 · 거래내역</div>
       <div style="display:flex;gap:14px;margin:14px 0">
@@ -449,7 +444,9 @@ function render(){
 }
 
 /* ===================== 동작 ===================== */
-function up(code,field,val){const r=S.rows.find(x=>x.code===code);if(r){r[field]=val===""?"":+val;save();render();}}
+function up(code,field,val){
+  if(field==="sector"){ S.rows.forEach(r=>{if(r.code===code)r.sector=val;}); save();render(); return; }   // 같은 종목 전 계좌에 적용
+  const r=S.rows.find(x=>x.code===code);if(r){r[field]=val===""?"":+val;save();render();}}
 function addTrade(){
   const g=id=>document.getElementById(id).value.trim();
   if(!g("tName")||!g("tQty")||!g("tBuy")||!g("tSell")){alert("종목·수량·매수가·매도가를 모두 입력하세요.");return;}
@@ -480,7 +477,7 @@ async function refreshPrices(){
     if(!res.ok)throw new Error("not found");
     const data=await res.json();
     let hit=0;
-    S.rows.forEach(r=>{const p=data[r.code];if(p){ if(p.price){r.price=p.price;r.prev=p.price-(+p.change||0);hit++;} if(p.sector)r.sector=p.sector; }});
+    S.rows.forEach(r=>{const p=data[r.code];if(p){ if(p.price){r.price=p.price;r.prev=p.price-(+p.change||0);hit++;} if(p.sector)r.sector=p.sector; if(Array.isArray(p.hist))r.hist=p.hist; }});
     let fxNote="";
     if(data._fx){
       if(data._fx.USD){S.fxUSD=data._fx.USD;}
@@ -694,19 +691,21 @@ function holdingsFromTx(){
   const pSec={},pTgt={}; (S.rows||[]).forEach(r=>{if(r.sector)pSec[r.code]=r.sector;if(r.target)pTgt[r.code]=r.target;});
   const pos={};
   const pPx={}; (S.rows||[]).forEach(r=>{if(+r.price)pPx[r.code]=+r.price;});   // 직전 현재가 유지
+  const pHist={}; (S.rows||[]).forEach(r=>{if(Array.isArray(r.hist))pHist[r.code]=r.hist;});   // 직전 추이 유지
   log.forEach(t=>{
     const acct=t.account||"기본", key=acct+"|"+t.code;
-    const p=pos[key]||(pos[key]={code:t.code,account:acct,name:t.name||t.code,qty:0,cost:0,cur:t.cur||"KRW"});
+    const p=pos[key]||(pos[key]={code:t.code,account:acct,name:t.name||t.code,qty:0,cost:0,cur:t.cur||"KRW",firstDate:""});
     if(t.name)p.name=t.name; if(t.cur)p.cur=t.cur;
-    if(t.type==="매수"){p.qty+=(+t.qty||0); p.cost+=(+t.qty||0)*(+t.price||0)+(+t.fee||0);}
+    if(t.type==="매수"){p.qty+=(+t.qty||0); p.cost+=(+t.qty||0)*(+t.price||0)+(+t.fee||0);
+      if(t.date&&(!p.firstDate||t.date<p.firstDate))p.firstDate=t.date;}   // 최초 매수일
     else{const avg=p.qty?p.cost/p.qty:0; p.cost-=avg*(+t.qty||0); p.qty-=(+t.qty||0);}
   });
   return Object.values(pos).filter(p=>p.qty>1e-6).map(p=>{
     const avg=Math.round(p.cost/p.qty), price=pPx[p.code]||avg, cur=p.cur||"KRW";
     return {name:p.name,code:p.code,account:p.account,sector:pSec[p.code]||"기타",
       market:(cur!=="KRW")?"해외":(/^\d{6}$/.test(p.code)?"국내":"해외"),cur,
-      qty:Math.round(p.qty*1e4)/1e4,avg,price,prev:price,
-      hi52:Math.round(price*1.3),lo52:Math.round(price*0.7),date:"2024-01-01",target:pTgt[p.code]||0};
+      qty:Math.round(p.qty*1e4)/1e4,avg,price,prev:price,hist:pHist[p.code]||null,
+      hi52:Math.round(price*1.3),lo52:Math.round(price*0.7),date:p.firstDate||"",target:pTgt[p.code]||0};
   });
 }
 // 거래내역(txlog)만으로 현재 보유 종목·평단가를 재구성 (잔고 CSV 불필요)
@@ -840,7 +839,6 @@ app.addEventListener("change",e=>{const t=e.target;
   else if(t.id==="cash"){S.cash=+t.value||0;save();render();}
   else if(t.id==="calcCode"){S.calcCode=t.value;save();render();}
   else if(t.id==="calcWeight"){S.calcWeight=+t.value||0;save();render();}
-  else if(t.id==="spxYtd"){S.spxYtd=t.value.trim();save();render();}
   else if(t.dataset.memo){ (S.txmemo||(S.txmemo={}))[t.dataset.memo]=t.value; save(); }
   else if(t.id==="txStock"){S._txStock=t.value;render();}
   else if(t.id==="txYear"){S._txYear=t.value;render();}

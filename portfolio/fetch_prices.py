@@ -446,7 +446,7 @@ def build_series(trades, cash, today):
         if qf.get(day): rec["kosdaq"] = qf[day]
         if sf.get(day): rec["spx"] = sf[day]
         series.append(rec)
-    return series
+    return series, phist
 
 # ---------- 실행 ----------
 print("보유종목 읽는 중...")
@@ -487,10 +487,13 @@ if fx: result["_fx"] = fx; print(f"  환율: {fx}")
 print("과거 시세로 자산추이 재구성 중...")
 try:
     _trades, _cash = load_all_tx()
-    _series = build_series(_trades, _cash, datetime.date.today())
+    _series, _phist = build_series(_trades, _cash, datetime.date.today())
     if _series:
         result["_series"] = _series
         print(f"  [OK] 자산추이 {len(_series)}일 재구성 (최근 총자산 약 {_series[-1]['asset']:,}원)")
+        for _c in [c for c in result if not c.startswith("_")]:   # 보유종목 한달 추이(스파크라인용)
+            if _c in _phist and _phist[_c]:
+                result[_c]["hist"] = [v for d, v in sorted(_phist[_c].items())[-22:]]
     else:
         print("  거래내역이 없어 자산추이 생략 (시트연결/CSV 확인)")
 except Exception as e:
