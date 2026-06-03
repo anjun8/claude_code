@@ -55,7 +55,7 @@ const DEFAULT={
     {name:"제주반도체",code:"080220",sector:"반도체",market:"국내",cur:"KRW",qty:30,avg:80000,price:101000,prev:98500,hi52:137100,lo52:12900,date:"2024-07-10",target:20},
   ],
   cash:1500000, fxUSD:FXD.USD, fxTWD:FXD.TWD, period:"YTD", calcCode:"000660", calcWeight:35,
-  pricedAt:"", history:[], spxYtd:"", trades:[], txlog:[], txmemo:{}, account:"", cashlog:[], gsUrl:"", sheetSources:[]
+  pricedAt:"", history:[], spxYtd:"", trades:[], txlog:[], txmemo:{}, account:"", cashlog:[], gsUrl:""
 };
 let S=load();
 const REALIZED=[];
@@ -169,29 +169,6 @@ function benchData(){
   return out;
 }
 
-function sheetPanelHTML(){
-  const src=S.sheetSources||[];
-  return `<div class="card" style="margin-bottom:14px">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div class="lbl">구글 시트 연동 — 계좌별 탭의 'CSV 게시 주소'</div>
-      <button class="btn" id="ssClose" style="padding:5px 10px">닫기</button>
-    </div>
-    <div style="font-size:12px;color:var(--faint);margin:8px 0 12px;line-height:1.6">
-      구글 시트에서 <b>계좌별 탭</b>에 거래내역 CSV를 붙여넣고 → <b>파일 → 공유 → 웹에 게시</b> →
-      해당 시트 선택, 형식 <b>CSV</b> → 나온 주소(<code>…output=csv</code>)를 아래에 넣으세요. (자세한 건 README 참고)
-    </div>
-    ${src.length?src.map((s,i)=>`<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
-      <input data-ss="account" data-i="${i}" value="${(s.account||'').replace(/"/g,'&quot;')}" placeholder="계좌이름(예: 계좌01)" style="width:130px;font-family:'Pretendard'">
-      <input data-ss="url" data-i="${i}" value="${(s.url||'').replace(/"/g,'&quot;')}" placeholder="https://docs.google.com/…/pub?gid=…&single=true&output=csv" style="flex:1">
-      <button class="delx" data-ssdel="${i}">×</button>
-    </div>`).join(""):`<div style="font-size:13px;color:var(--faint);padding:6px 0">아직 연결된 시트가 없어요. 아래 '+ 계좌 추가'로 시작하세요.</div>`}
-    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-      <button class="btn" id="ssAdd">+ 계좌 추가</button>
-      <button class="btn p" id="ssLoad">⟳ 시트에서 불러오기</button>
-    </div>
-  </div>`;
-}
-
 /* ===================== 렌더 ===================== */
 function render(){
   const d=compute();
@@ -228,7 +205,6 @@ function render(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <button class="btn p" id="refreshBtn">↻ 시세 새로고침</button>
       <button class="btn" id="sheetLoadBtn">⟳ 시트에서 불러오기</button>
-      <button class="btn" id="sheetCfgBtn">시트설정</button>
       <button class="btn" id="csvBtn">CSV 가져오기</button>
       <button class="btn" id="tmplBtn">양식</button>
       <button class="btn" id="gsBackupBtn">📗 구글시트 백업</button>
@@ -242,7 +218,6 @@ function render(){
   </div>
 
   ${acctBar}
-  ${S._sheetPanel?sheetPanelHTML():""}
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
     ${kpi("총 자산 (주식+현금)",won(d.totalAsset),"주식 "+won(d.stockVal))}
     ${kpi("총 평가손익",won(d.totalPl),pct(d.totalPlPct),ud(d.totalPl))}
@@ -617,27 +592,33 @@ function rebuildFromTx(){
 }
 function onJson(file){const rd=new FileReader();rd.onload=()=>{try{const s=JSON.parse(rd.result);S=Object.assign({},DEFAULT,s);save();render();}catch(e){alert("백업 파일을 읽을 수 없습니다.");}};rd.readAsText(file);}
 
-/* ===================== 구글 시트에서 거래내역 불러오기 (계좌별 탭) ===================== */
-// 시트는 '원본'이므로 불러올 때 txlog/cashlog를 전부 새로 만들고 보유종목도 재계산
+/* ===================== 구글 시트에서 거래내역 불러오기 (URL 하나 → 모든 탭=계좌) ===================== */
+// Apps Script 웹앱(doGet)이 시트의 모든 탭을 JSON으로 내려줌. 탭 이름 = 계좌 이름.
 async function loadFromSheets(){
-  const srcs=(S.sheetSources||[]).filter(s=>(s.url||"").trim());
-  if(!srcs.length){ alert("먼저 '시트설정'에서 계좌별 시트 CSV 주소를 넣어주세요."); S._sheetPanel=true; render(); return; }
-  const allTx=[], allCf=[], errs=[];
-  for(const s of srcs){
-    const acct=(s.account||"기본").trim()||"기본";
-    try{
-      const url=s.url.trim()+(s.url.includes("?")?"&":"?")+"_t="+Date.now();
-      const res=await fetch(url); if(!res.ok) throw new Error("HTTP "+res.status);
-      const {trades,cashflows}=parseTxRows(parseCSV(await res.text()));
-      trades.forEach(t=>allTx.push({txno:acct+"|"+t.date+"_"+t.seq,account:acct,date:t.date,type:t.type,code:t.code,name:t.name,qty:t.qty,price:t.price,fee:t.type==="매수"?t.fee:0,tax:t.type==="매도"?t.fee:0}));
-      cashflows.forEach(c=>allCf.push({cfno:acct+"|cf|"+c.date+"_"+c.seq,account:acct,date:c.date,amount:c.amount,desc:c.desc}));
-    }catch(e){ errs.push(acct+" → "+e.message); }
+  if(!S.gsUrl){ if(!gsSetup()) return; }
+  let data;
+  try{
+    const res=await fetch(S.gsUrl+(S.gsUrl.includes("?")?"&":"?")+"_t="+Date.now());
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    data=await res.json();
+  }catch(e){
+    alert("시트에서 못 읽었어요: "+e.message+"\n\n확인:\n· '시트연결'에 Apps Script 웹앱 URL(…/exec)을 넣었는지\n· 웹앱 배포 시 액세스가 '모든 사용자'인지\n· google_apps_script.gs 최신 코드(doGet 포함)로 다시 배포했는지\n· 인터넷 연결"); return;
   }
-  if(!allTx.length){ alert("시트에서 매매내역을 못 읽었어요:\n"+errs.join("\n")+"\n\n확인:\n· 시트를 '파일→공유→웹에 게시→CSV'로 게시했는지\n· 주소가 …output=csv 인지\n· 인터넷 연결"); return; }
+  const tabs=(data&&data.tabs)||[];
+  const allTx=[], allCf=[], accts=[], skipped=[];
+  tabs.forEach(tb=>{
+    const acct=(tb.name||"기본").trim()||"기본";
+    if(!tb.rows||!looksLikeTx(tb.rows)){ skipped.push(acct); return; }   // 거래내역처럼 안 생긴 탭은 건너뜀
+    accts.push(acct);
+    const {trades,cashflows}=parseTxRows(tb.rows);
+    trades.forEach(t=>allTx.push({txno:acct+"|"+t.date+"_"+t.seq,account:acct,date:t.date,type:t.type,code:t.code,name:t.name,qty:t.qty,price:t.price,fee:t.type==="매수"?t.fee:0,tax:t.type==="매도"?t.fee:0}));
+    cashflows.forEach(c=>allCf.push({cfno:acct+"|cf|"+c.date+"_"+c.seq,account:acct,date:c.date,amount:c.amount,desc:c.desc}));
+  });
+  if(!allTx.length){ alert("시트에서 거래내역을 찾지 못했어요.\n계좌별 '탭'에 거래내역 CSV를 붙여넣었는지 확인해주세요. (탭 이름이 곧 계좌 이름이 됩니다)"+(skipped.length?"\n\n건너뛴 탭: "+skipped.join(", "):"")); return; }
   allTx.sort((a,b)=>a.date<b.date?-1:1); allCf.sort((a,b)=>a.date<b.date?-1:1);
   S.txlog=allTx; S.cashlog=allCf; S.rows=holdingsFromTx();
   save(); render();
-  alert("시트에서 매매 "+allTx.length+"건·입출금 "+allCf.length+"건을 불러와 보유종목을 계산했어요.\n계좌: "+[...new Set(allTx.map(t=>t.account))].join(", ")+(errs.length?"\n\n(일부 실패: "+errs.join(", ")+")":"")+"\n\n'↻ 시세 새로고침'으로 현재가를 채우세요.");
+  alert("시트에서 매매 "+allTx.length+"건·입출금 "+allCf.length+"건을 불러와 보유종목을 계산했어요.\n계좌(탭): "+accts.join(", ")+"\n\n'↻ 시세 새로고침'으로 현재가를 채우세요.");
 }
 
 /* ===================== 구글 시트 백업 (Apps Script 웹앱) ===================== */
@@ -674,7 +655,7 @@ function gsPayload(){
   return {holdings,txlog,history,cashlog,monthly,meta};
 }
 function gsSetup(){
-  const url=prompt("구글 Apps Script 웹앱 URL을 붙여넣어 주세요.\n(만드는 법: README의 '구글 시트 연동' 참고 — google_apps_script.gs 코드 사용)\n\n예: https://script.google.com/macros/s/AKfy.../exec",S.gsUrl||"");
+  const url=prompt("구글 Apps Script 웹앱 URL을 붙여넣어 주세요.\n이 URL 하나로 '시트에서 불러오기'(읽기)와 '구글시트 백업'(쓰기)을 다 해요.\n(만드는 법: README의 '구글 시트 연동' — google_apps_script.gs 코드 사용)\n\n예: https://script.google.com/macros/s/AKfy.../exec",S.gsUrl||"");
   if(url==null) return false;
   S.gsUrl=url.trim(); save();
   return !!S.gsUrl;
@@ -698,7 +679,6 @@ app.addEventListener("change",e=>{const t=e.target;
   else if(t.id==="calcWeight"){S.calcWeight=+t.value||0;save();render();}
   else if(t.id==="spxYtd"){S.spxYtd=t.value.trim();save();render();}
   else if(t.dataset.memo){ (S.txmemo||(S.txmemo={}))[t.dataset.memo]=t.value; save(); }
-  else if(t.dataset.ss){ const i=+t.dataset.i; if(S.sheetSources&&S.sheetSources[i]){ S.sheetSources[i][t.dataset.ss]=t.value.trim(); save(); } }
   else if(t.id==="csvFile"&&t.files[0]){onCsv(t.files[0]);t.value="";}
   else if(t.id==="txFile"&&t.files[0]){importTx(t.files[0]);t.value="";}
   else if(t.id==="jsonFile"&&t.files[0]){onJson(t.files[0]);t.value="";}
@@ -727,11 +707,6 @@ app.addEventListener("click",e=>{const t=e.target;
   else if(t.id==="gsBackupBtn")gsBackup();
   else if(t.id==="gsSetupBtn")gsSetup();
   else if(t.id==="sheetLoadBtn")loadFromSheets();
-  else if(t.id==="sheetCfgBtn"){S._sheetPanel=!S._sheetPanel;render();}
-  else if(t.id==="ssClose"){S._sheetPanel=false;render();}
-  else if(t.id==="ssAdd"){(S.sheetSources||(S.sheetSources=[])).push({account:"계좌"+("0"+(S.sheetSources.length+1)).slice(-2),url:""});save();render();}
-  else if(t.dataset.ssdel!==undefined){S.sheetSources.splice(+t.dataset.ssdel,1);save();render();}
-  else if(t.id==="ssLoad")loadFromSheets();
   else if(t.id==="csvBtn")document.getElementById("csvFile").click();
   else if(t.id==="txBtn")document.getElementById("txFile").click();
   else if(t.id==="impBtn")document.getElementById("jsonFile").click();

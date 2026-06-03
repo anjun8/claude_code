@@ -39,7 +39,24 @@ function doPost(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// (선택) 브라우저로 URL을 직접 열었을 때 동작 확인용
+/**
+ * doGet: 대시보드 '시트에서 불러오기'가 호출.
+ * 이 스프레드시트의 '모든 탭'을 읽어 JSON으로 돌려줍니다. (탭 이름 = 계좌 이름)
+ * 백업으로 만들어진 탭(보유종목/거래내역/…)은 제외하므로, 같은 시트에 백업이 있어도 안전합니다.
+ * → 계좌가 늘면 탭만 추가하면 됩니다. 대시보드 설정은 URL 하나로 끝.
+ */
 function doGet() {
-  return ContentService.createTextOutput('OK - 포트폴리오 백업 웹앱이 동작 중입니다.');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var reserved = { '보유종목': 1, '거래내역': 1, '자산추이': 1, '입출금': 1, '월별요약': 1, '정보': 1 };
+  var tabs = [];
+  ss.getSheets().forEach(function (sh) {
+    var name = sh.getName();
+    if (reserved[name]) return;
+    var rng = sh.getDataRange();
+    if (rng.getNumRows() < 2) return;
+    tabs.push({ name: name, rows: rng.getDisplayValues() });   // 표시값(날짜 등은 보이는 문자열로)
+  });
+  return ContentService
+    .createTextOutput(JSON.stringify({ tabs: tabs }))
+    .setMimeType(ContentService.MimeType.JSON);
 }

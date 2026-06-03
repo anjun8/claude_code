@@ -10,9 +10,9 @@
 import requests, json, datetime, glob, os, csv as csvmod, io
 
 EXIM_KEY = ""   # (선택) 수출입은행 환율 인증키. 비우면 환율은 건너뜀.
-# (선택) 구글 시트 CSV 게시 주소. 여기에 넣으면 폴더에 CSV가 없어도 시트에서 보유종목을 읽어요.
-# 계좌별 탭 주소를 줄줄이 넣으면 됩니다. 예: ["https://docs.google.com/.../pub?gid=0&single=true&output=csv", ...]
-SHEET_CSV_URLS = []
+# (선택) 구글 시트 Apps Script 웹앱 URL(…/exec). 넣으면 폴더에 CSV가 없어도 시트의 모든 탭에서
+#        보유종목을 읽어 시세를 받습니다. (대시보드 '시트연결'에 넣는 URL과 동일)
+GAS_WEBAPP_URL = ""
 FX_CURRENCIES = ["USD", "TWD"]
 HDR = {"User-Agent": "Mozilla/5.0", "Referer": "https://m.stock.naver.com/"}
 
@@ -109,15 +109,17 @@ def _rows_of(text):
     return list(csvmod.reader(io.StringIO(text)))
 
 def load_stocks():
-    # 구글 시트 URL(설정 시) + 폴더의 모든 CSV에서 현재 보유 종목을 합칩니다(계좌 여러 개 OK).
+    # 구글 시트 웹앱(설정 시) + 폴더의 모든 CSV에서 현재 보유 종목을 합칩니다(계좌 여러 개 OK).
     out = {}
-    for url in (SHEET_CSV_URLS or []):
+    if GAS_WEBAPP_URL:
         try:
-            txt = requests.get(url, headers=HDR, timeout=15).text
-            rows = _rows_of(txt)
-            got = _from_tx(rows) if _is_tx(rows) else _from_balance(rows)
-            print(f"  [시트] {len(got)}종목 읽음")
-            out.update(got)
+            data = requests.get(GAS_WEBAPP_URL, headers=HDR, timeout=20).json()
+            for tab in data.get("tabs", []):
+                rows = tab.get("rows", [])
+                if _is_tx(rows):
+                    got = _from_tx(rows)
+                    print(f"  [시트:{tab.get('name','?')}] {len(got)}종목 읽음")
+                    out.update(got)
         except Exception as e:
             print(f"  [시트] 읽기 실패: {type(e).__name__}")
     for path in glob.glob("*.csv"):
