@@ -176,6 +176,37 @@ function render(){
   const accts=[...new Set(S.rows.map(x=>x.account||"기본"))];
   const txAll=S.txlog||[];
   const txShown=sel?txAll.filter(t=>(t.account||"기본")===sel):txAll;
+  // 매매일지 필터(종목/월) + 묶기(주별/월별)
+  const txStock=S._txStock||"", txMonth=S._txMonth||"", txGroup=S._txGroup||"none";
+  const txStocks=[...new Map(txShown.map(t=>[t.code,t.name])).entries()].sort((a,b)=>a[1]<b[1]?-1:1);
+  const txMonths=[...new Set(txShown.map(t=>(t.date||"").slice(0,7)).filter(Boolean))].sort().reverse();
+  const txFiltered=txShown.filter(t=>(!txStock||t.code===txStock)&&(!txMonth||(t.date||"").slice(0,7)===txMonth));
+  const weekKey=ds=>{const dt=new Date(ds);if(isNaN(dt))return ds||"(날짜없음)";const o=new Date(dt);const day=(dt.getDay()+6)%7;o.setDate(dt.getDate()-day);return o.toISOString().slice(0,10)+" 주";};
+  const groupKey=t=> txGroup==="month"?((t.date||"").slice(0,7)||"(날짜없음)") : txGroup==="week"?weekKey(t.date) : null;
+  const txCtrl=`<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+    <select id="txStock" style="max-width:160px"><option value="">전체 종목</option>${txStocks.map(([c,n])=>`<option value="${c}" ${c===txStock?'selected':''}>${n}</option>`).join("")}</select>
+    <select id="txMonth"><option value="">전체 기간</option>${txMonths.map(m=>`<option value="${m}" ${m===txMonth?'selected':''}>${m}</option>`).join("")}</select>
+    <select id="txGroup"><option value="none" ${txGroup==='none'?'selected':''}>묶기 없음</option><option value="week" ${txGroup==='week'?'selected':''}>주별 묶기</option><option value="month" ${txGroup==='month'?'selected':''}>월별 묶기</option></select>
+    ${(txStock||txMonth)?`<button class="btn" id="txClear" style="padding:5px 10px">필터 해제</button>`:""}
+  </div>`;
+  // tbody rows (그룹 헤더 포함). 최신순.
+  const txRowsArr=txFiltered.slice().reverse();
+  let txBody="", lastG=null;
+  txRowsArr.forEach(t=>{
+    if(txGroup!=="none"){ const g=groupKey(t); if(g!==lastG){ lastG=g;
+      const inG=txFiltered.filter(x=>groupKey(x)===g);
+      const buy=inG.filter(x=>x.type==="매수").reduce((a,x)=>a+(+x.qty||0)*(+x.price||0),0);
+      const sell=inG.filter(x=>x.type==="매도").reduce((a,x)=>a+(+x.qty||0)*(+x.price||0),0);
+      txBody+=`<tr><td colspan="6" style="background:var(--panel2);font-weight:600;font-size:12px;color:var(--gold);padding:6px 10px">${g} · ${inG.length}건 · 매수 ${won(buy)} / 매도 ${won(sell)}</td></tr>`; } }
+    txBody+=`<tr>
+      <td class="mono" style="color:var(--faint);font-size:12px">${t.date||"-"}</td>
+      <td style="color:${t.type==='매수'?'var(--up)':'var(--down)'};font-weight:600">${t.type}</td>
+      <td>${t.name}${sel?"":`<span style="font-size:10px;color:var(--faint);margin-left:5px">${t.account||"기본"}</span>`}</td>
+      <td class="mono" style="text-align:right">${t.qty}</td>
+      <td class="mono" style="text-align:right">${(+t.price).toLocaleString()}</td>
+      <td><input data-memo="${t.txno}" value="${(S.txmemo&&S.txmemo[t.txno]||'').replace(/"/g,'&quot;')}" placeholder="…" style="width:100%;font-family:'Pretendard';background:transparent;border:1px solid var(--border);border-radius:5px;padding:3px 6px;font-size:12px"></td>
+    </tr>`;
+  });
   const acctBar=accts.length>1?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
     <span class="lbl">계좌</span>
     <div style="display:flex;gap:4px;background:var(--panel2);padding:4px;border-radius:9px;flex-wrap:wrap">
@@ -341,20 +372,13 @@ function render(){
         <div style="flex:1;padding:14px;background:var(--panel2);border-radius:10px"><div style="font-size:12px;color:var(--muted)">평가 손익 (보유 중)</div><div class="mono" style="font-size:20px;font-weight:700;color:${ud(d.totalPl)};margin-top:4px">${won(d.totalPl)}</div></div>
         <div style="flex:1;padding:14px;background:var(--panel2);border-radius:10px"><div style="font-size:12px;color:var(--muted)">실현 손익 (세후·평균단가)</div><div class="mono" style="font-size:20px;font-weight:700;color:${ud(d.realizedPl)};margin-top:4px">${won(d.realizedPl)}</div></div>
       </div>
-      ${txShown.length?`<div style="font-size:11px;color:var(--faint);margin-bottom:6px">총 ${txShown.length}건${sel?` · ${sel}`:""} · 메모 칸에 매수/매도 이유를 적어 복기하세요</div>
-      <div style="max-height:320px;overflow:auto"><table><thead><tr>
+      ${txShown.length?`${txCtrl}<div style="font-size:11px;color:var(--faint);margin-bottom:6px">${txFiltered.length}건${txStock?` · ${(txStocks.find(s=>s[0]===txStock)||[,''])[1]}`:""}${txMonth?` · ${txMonth}`:""}${sel?` · ${sel}`:""} · 메모 칸에 매수/매도 이유를 적어 복기하세요</div>
+      <div style="max-height:360px;overflow:auto"><table><thead><tr>
         ${["날짜","구분","종목","수량","단가","복기 메모"].map((h,i)=>`<th style="text-align:${i<2?'left':i===5?'left':'right'};position:sticky;top:0;background:var(--panel)">${h}</th>`).join("")}
       </tr></thead><tbody>
-        ${txShown.slice().reverse().map(t=>`<tr>
-          <td class="mono" style="color:var(--faint);font-size:12px">${t.date}</td>
-          <td style="color:${t.type==='매수'?'var(--up)':'var(--down)'};font-weight:600">${t.type}</td>
-          <td>${t.name}${sel?"":`<span style="font-size:10px;color:var(--faint);margin-left:5px">${t.account||"기본"}</span>`}</td>
-          <td class="mono" style="text-align:right">${t.qty}</td>
-          <td class="mono" style="text-align:right">${(+t.price).toLocaleString()}</td>
-          <td><input data-memo="${t.txno}" value="${(S.txmemo&&S.txmemo[t.txno]||'').replace(/"/g,'&quot;')}" placeholder="…" style="width:100%;font-family:'Pretendard';background:transparent;border:1px solid var(--border);border-radius:5px;padding:3px 6px;font-size:12px"></td>
-        </tr>`).join("")}
+        ${txBody||`<tr><td colspan="6" style="color:var(--faint);padding:10px">조건에 맞는 거래가 없어요.</td></tr>`}
       </tbody></table></div>`
-      :`<div style="font-size:13px;color:var(--faint);padding:10px 0">메리츠 HTS에서 받은 <b>거래내역 CSV</b>를 가져오면 전체 매매가 시간순으로 쌓이고, 실현손익이 자동 계산돼요. 각 줄에 복기 메모도 달 수 있어요.</div>`}
+      :`<div style="font-size:13px;color:var(--faint);padding:10px 0">증권사에서 받은 <b>거래내역 CSV</b>를 가져오거나 <b>시트에서 불러오기</b> 하면 전체 매매가 쌓이고, 실현손익이 자동 계산돼요. 각 줄에 복기 메모도 달 수 있어요.</div>`}
     </div>
   </div>`;
 }
@@ -701,6 +725,9 @@ app.addEventListener("change",e=>{const t=e.target;
   else if(t.id==="calcWeight"){S.calcWeight=+t.value||0;save();render();}
   else if(t.id==="spxYtd"){S.spxYtd=t.value.trim();save();render();}
   else if(t.dataset.memo){ (S.txmemo||(S.txmemo={}))[t.dataset.memo]=t.value; save(); }
+  else if(t.id==="txStock"){S._txStock=t.value;render();}
+  else if(t.id==="txMonth"){S._txMonth=t.value;render();}
+  else if(t.id==="txGroup"){S._txGroup=t.value;render();}
   else if(t.id==="csvFile"&&t.files[0]){onCsv(t.files[0]);t.value="";}
   else if(t.id==="txFile"&&t.files[0]){importTx(t.files[0]);t.value="";}
   else if(t.id==="jsonFile"&&t.files[0]){onJson(t.files[0]);t.value="";}
@@ -722,6 +749,7 @@ app.addEventListener("click",e=>{const t=e.target;
       S.rows=[]; S.txlog=[]; S.txmemo={}; S.trades=[]; S.cashlog=[]; S.account=""; save();render();}}
   else if(t.id==="addBtn")addRow();
   else if(t.id==="rebuildBtn")rebuildFromTx();
+  else if(t.id==="txClear"){S._txStock="";S._txMonth="";render();}
   else if(t.id==="tradeBtn")addTrade();
   else if(t.id==="refreshBtn")refreshPrices();
   else if(t.id==="tmplBtn")tmpl();
