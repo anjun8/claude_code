@@ -624,7 +624,17 @@ async function loadFromSheets(){
     trades.forEach(t=>allTx.push({txno:acct+"|"+t.date+"_"+t.seq,account:acct,date:t.date,type:t.type,code:t.code,name:t.name,qty:t.qty,price:t.price,fee:t.type==="매수"?t.fee:0,tax:t.type==="매도"?t.fee:0}));
     cashflows.forEach(c=>allCf.push({cfno:acct+"|cf|"+c.date+"_"+c.seq,account:acct,date:c.date,amount:c.amount,desc:c.desc}));
   });
-  if(!allTx.length){ alert("시트에서 거래내역을 찾지 못했어요.\n계좌별 '탭'에 거래내역 CSV를 붙여넣었는지 확인해주세요. (탭 이름이 곧 계좌 이름이 됩니다)"+(skipped.length?"\n\n건너뛴 탭: "+skipped.join(", "):"")); return; }
+  if(!allTx.length){
+    let diag="";
+    const tb=tabs[0];
+    if(!tabs.length) diag="\n\n[진단] 시트 탭을 못 받음(tabs 비어있음).";
+    else{ const rws=(tb&&tb.rows)||[];
+      diag="\n\n[진단]\n탭수="+tabs.length+", 첫탭='"+(tb&&tb.name)+"', 행수="+rws.length+", tx판정="+looksLikeTx(rws)
+        +"\n헤더行0="+JSON.stringify((rws[0]||[]).slice(0,8))
+        +"\n샘플行2="+JSON.stringify((rws[2]||rws[1]||[]).slice(0,8));
+    }
+    alert("시트에서 거래내역을 찾지 못했어요."+(skipped.length?"\n건너뛴 탭: "+skipped.join(", "):"")+diag
+      +"\n\n이 [진단] 내용을 그대로 복사해서 알려주시면 바로 고쳐드려요."); return; }
   allTx.sort((a,b)=>a.date<b.date?-1:1); allCf.sort((a,b)=>a.date<b.date?-1:1);
   S.txlog=allTx; S.cashlog=allCf; S.rows=holdingsFromTx();
   save(); render();
