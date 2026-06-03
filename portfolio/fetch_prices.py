@@ -276,20 +276,51 @@ def naver_daily(code, start_ymd, end_ymd):
         print(f"    과거시세 실패 {code}: {type(e).__name__}")
         return {}
 
-def index_daily(name):  # 'KOSPI' / 'KOSDAQ'
+def _index_from_files(keys):
+    """폴더의 파일명에 keys(예: kospi/코스피)가 든 CSV에서 일별 지수 읽기. (날짜 + 숫자 두 칸)"""
     out = {}
-    try:
+    for path in glob.glob("*.csv"):
+        if not any(k in path.lower() for k in keys): continue
+        try:
+            for r in _rows_of(_decode(path)):
+                d = next((_date_str(c) for c in r if _date_str(c)), "")
+                if not d: continue
+                v = next((_num(c) for c in r if not _date_str(c) and _num(c) > 0), 0)
+                if v: out[d] = v
+        except Exception:
+            continue
+    if out: print(f"    [지수파일] {keys[0]} {len(out)}일 읽음")
+    return out
+
+def index_daily(name):  # 'KOSPI' / 'KOSDAQ'
+    keys = ["kospi", "코스피"] if name == "KOSPI" else ["kosdaq", "코스닥"]
+    f = _index_from_files(keys)            # 1) 폴더의 kospi.csv / kosdaq.csv 우선
+    if f: return f
+    try:                                   # 2) 네이버 fchart 일봉(XML)
+        txt = requests.get(f"https://fchart.stock.naver.com/sise.nhn?symbol={name}&timeframe=day&count=400&requestType=0",
+                           headers=HDR, timeout=15).text
+        out = {}
+        for m in _re.finditer(r'data="([^"]+)"', txt):
+            p = m.group(1).split("|")
+            if len(p) >= 5 and len(p[0]) == 8 and p[0].isdigit():
+                out[f"{p[0][:4]}-{p[0][4:6]}-{p[0][6:8]}"] = float(p[4])
+        if out: return out
+    except Exception as e:
+        print(f"    지수 fchart 실패 {name}: {type(e).__name__}")
+    try:                                   # 3) m.stock JSON (fallback)
+        out = {}
         for page in range(1, 8):
-            url = f"https://m.stock.naver.com/api/index/{name}/price?pageSize=100&page={page}"
-            arr = requests.get(url, headers=HDR, timeout=15).json()
+            arr = requests.get(f"https://m.stock.naver.com/api/index/{name}/price?pageSize=100&page={page}",
+                               headers=HDR, timeout=15).json()
             if not arr: break
             for d in arr:
                 ds = _re.sub(r"[./]", "-", str(d.get("localTradedAt", ""))[:10])
                 cp = float(str(d.get("closePrice", "0")).replace(",", "") or 0)
                 if _re.match(r"\d{4}-\d{2}-\d{2}", ds) and cp: out[ds] = cp
+        return out
     except Exception as e:
         print(f"    지수 과거 실패 {name}: {type(e).__name__}")
-    return out
+        return {}
 
 def stooq_daily(start, end):  # S&P500 (^spx) {yyyy-mm-dd: close}
     try:
@@ -313,6 +344,7 @@ def build_series(trades, cash, today):
     print(f"  과거 일별 종가 받는 중... ({len(codes)}종목, {start}~{end})")
     phist = {code: naver_daily(code, start.replace("-", ""), end.replace("-", "")) for code in codes}
     kospi = index_daily("KOSPI"); kosdaq = index_daily("KOSDAQ"); spx = stooq_daily(start, end)
+    print(f"  지수/벤치마크: 코스피 {len(kospi)}일 · 코스닥 {len(kosdaq)}일 · S&P {len(spx)}일")
     daysset = set()
     for h in phist.values(): daysset |= set(h.keys())
     daysset |= set(kospi.keys())
