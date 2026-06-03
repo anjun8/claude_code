@@ -152,15 +152,17 @@ function trendSVG(which){   // 총자산(절대액) 곡선
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}"><polyline points="${pts}" fill="none" stroke="var(--gold)" stroke-width="2"/></svg>`;
 }
 // 시간가중수익률(TWR) 지수: 입출금 영향 제거 → 원금 추가가 수익률에 안 잡힘
+// 입출금은 '거래일이 아닌 날'에 생겨도 다음 기록일 구간으로 합산해 빼준다(폭등 버그 방지).
 function twrIndex(){
   const h=(S.history||[]).slice().sort((a,b)=>a.d<b.d?-1:1);
-  const flow={}; (S.cashlog||[]).forEach(c=>{flow[c.date]=(flow[c.date]||0)+(+c.amount||0);});
-  let idx=1, prev=null; const out=[];
+  const flows=(S.cashlog||[]).map(c=>({d:c.date||"",a:+c.amount||0})).filter(x=>x.d).sort((a,b)=>a.d<b.d?-1:1);
+  let idx=1, prev=null, prevDate=null, fi=0; const out=[];
   h.forEach(p=>{
-    const f=flow[p.d]||0;
-    if(prev!=null&&prev>0){ idx*=(1+((p.asset-f)/prev-1)); }   // 당일수익률 = (자산-입출금)/전일자산 - 1
+    let f=0;
+    while(fi<flows.length && flows[fi].d<=p.d){ if(prevDate!=null && flows[fi].d>prevDate) f+=flows[fi].a; fi++; }  // (이전기록일, 현재기록일] 사이 입출금 합
+    if(prev!=null&&prev>0){ idx*=(1+((p.asset-f)/prev-1)); }
     out.push({d:p.d, twr:idx, kospi:p.kospi, kosdaq:p.kosdaq, spx:p.spx});
-    prev=p.asset;
+    prev=p.asset; prevDate=p.d;
   });
   return out;
 }
