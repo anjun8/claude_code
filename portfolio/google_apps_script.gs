@@ -45,7 +45,7 @@ function doPost(e) {
  * 백업으로 만들어진 탭(보유종목/거래내역/…)은 제외하므로, 같은 시트에 백업이 있어도 안전합니다.
  * → 계좌가 늘면 탭만 추가하면 됩니다. 대시보드 설정은 URL 하나로 끝.
  */
-function doGet() {
+function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var reserved = { '보유종목': 1, '거래내역': 1, '자산추이': 1, '입출금': 1, '월별요약': 1, '정보': 1 };
   var tabs = [];
@@ -56,7 +56,12 @@ function doGet() {
     if (rng.getNumRows() < 2) return;
     tabs.push({ name: name, rows: rng.getDisplayValues() });   // 표시값(날짜 등은 보이는 문자열로)
   });
-  return ContentService
-    .createTextOutput(JSON.stringify({ tabs: tabs }))
-    .setMimeType(ContentService.MimeType.JSON);
+  var out = JSON.stringify({ tabs: tabs });
+  // 브라우저는 CORS 때문에 JSONP(callback)로 호출함
+  var cb = e && e.parameter && e.parameter.callback;
+  if (cb) {
+    return ContentService.createTextOutput(cb + '(' + out + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(out).setMimeType(ContentService.MimeType.JSON);
 }

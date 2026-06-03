@@ -593,16 +593,26 @@ function rebuildFromTx(){
 function onJson(file){const rd=new FileReader();rd.onload=()=>{try{const s=JSON.parse(rd.result);S=Object.assign({},DEFAULT,s);save();render();}catch(e){alert("백업 파일을 읽을 수 없습니다.");}};rd.readAsText(file);}
 
 /* ===================== 구글 시트에서 거래내역 불러오기 (URL 하나 → 모든 탭=계좌) ===================== */
+// Apps Script는 브라우저 fetch가 CORS로 막히므로 JSONP(<script>)로 호출
+function jsonpGet(url, timeoutMs){
+  return new Promise((resolve,reject)=>{
+    const cb="__pf_cb_"+Date.now()+Math.floor(Math.random()*1e6);
+    const s=document.createElement("script"); let done=false;
+    const clean=()=>{ try{delete window[cb];}catch(e){window[cb]=undefined;} s.remove(); };
+    window[cb]=d=>{ done=true; clean(); resolve(d); };
+    s.onerror=()=>{ if(done)return; clean(); reject(new Error("스크립트 로드 실패 (URL/배포/인터넷 확인)")); };
+    s.src=url+(url.includes("?")?"&":"?")+"callback="+cb+"&_t="+Date.now();
+    document.body.appendChild(s);
+    setTimeout(()=>{ if(done)return; clean(); reject(new Error("응답 시간 초과")); }, timeoutMs||20000);
+  });
+}
 // Apps Script 웹앱(doGet)이 시트의 모든 탭을 JSON으로 내려줌. 탭 이름 = 계좌 이름.
 async function loadFromSheets(){
   if(!S.gsUrl){ if(!gsSetup()) return; }
   let data;
-  try{
-    const res=await fetch(S.gsUrl+(S.gsUrl.includes("?")?"&":"?")+"_t="+Date.now());
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    data=await res.json();
-  }catch(e){
-    alert("시트에서 못 읽었어요: "+e.message+"\n\n확인:\n· '시트연결'에 Apps Script 웹앱 URL(…/exec)을 넣었는지\n· 웹앱 배포 시 액세스가 '모든 사용자'인지\n· google_apps_script.gs 최신 코드(doGet 포함)로 다시 배포했는지\n· 인터넷 연결"); return;
+  try{ data=await jsonpGet(S.gsUrl, 20000); }
+  catch(e){
+    alert("시트에서 못 읽었어요: "+e.message+"\n\n확인:\n· google_apps_script.gs 최신 코드(JSONP 지원)로 '새 버전' 배포했는지\n  (배포 → 배포 관리 → ✏️편집 → 버전: 새 버전 → 배포)\n· 웹앱 액세스가 '모든 사용자'인지\n· '시트연결' URL이 …/exec 인지\n· 인터넷 연결"); return;
   }
   const tabs=(data&&data.tabs)||[];
   const allTx=[], allCf=[], accts=[], skipped=[];
