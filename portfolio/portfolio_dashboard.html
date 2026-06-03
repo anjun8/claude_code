@@ -668,7 +668,7 @@ function importTxRows(rows, fileName){
   const seenCf={}; (S.cashlog||(S.cashlog=[])).forEach(c=>seenCf[c.cfno]=1);
   let added=0, addedCf=0;
   trades.forEach(t=>{ const txno=acct+"|"+t.date+"_"+t.seq; if(seen[txno])return; seen[txno]=1;
-    S.txlog.push({txno,account:acct,date:t.date,type:t.type,code:t.code,name:t.name,qty:t.qty,price:t.price,
+    S.txlog.push({txno,account:acct,date:t.date,type:t.type,code:t.code,name:t.name,qty:t.qty,price:t.price,cur:t.cur||"KRW",
       fee:t.type==="매수"?t.fee:0, tax:t.type==="매도"?t.fee:0}); added++; });
   cashflows.forEach(c=>{ const cfno=acct+"|cf|"+c.date+"_"+c.seq; if(seenCf[cfno])return; seenCf[cfno]=1;
     S.cashlog.push({cfno,account:acct,date:c.date,amount:c.amount,desc:c.desc}); addedCf++; });
@@ -751,7 +751,7 @@ async function loadFromSheets(){
     if(!tb.rows||!looksLikeTx(tb.rows)){ skipped.push(acct); return; }   // 거래내역처럼 안 생긴 탭은 건너뜀
     accts.push(acct);
     const {trades,cashflows}=parseTxRows(tb.rows);
-    trades.forEach(t=>allTx.push({txno:acct+"|"+t.date+"_"+t.seq,account:acct,date:t.date,type:t.type,code:t.code,name:t.name,qty:t.qty,price:t.price,fee:t.type==="매수"?t.fee:0,tax:t.type==="매도"?t.fee:0}));
+    trades.forEach(t=>allTx.push({txno:acct+"|"+t.date+"_"+t.seq,account:acct,date:t.date,type:t.type,code:t.code,name:t.name,qty:t.qty,price:t.price,cur:t.cur||"KRW",fee:t.type==="매수"?t.fee:0,tax:t.type==="매도"?t.fee:0}));
     cashflows.forEach(c=>allCf.push({cfno:acct+"|cf|"+c.date+"_"+c.seq,account:acct,date:c.date,amount:c.amount,desc:c.desc}));
   });
   if(!allTx.length){
