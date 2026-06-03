@@ -528,7 +528,7 @@ const isDateStr=s=>/^\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}$/.test(String(s||"").trim()
 // 거래내역(헤더 여러 줄 + 2줄=1거래) 형식인지 판별 (헤더가 위쪽 메타행 아래 있어도 인식)
 function looksLikeTx(rows){
   const hdr=rows.slice(0,12).map(r=>r.join("")).join("").replace(/\s+/g,"");
-  if(/거래종류|거래일자|거래번호|거래적요|주식매수|주식매도/.test(hdr)) return true;
+  if(/거래종류|거래일자|거래번호|거래적요|주식매수|주식매도|매매구분|매매일자|재정환율/.test(hdr)) return true;
   let dates=0; rows.forEach(r=>{ if(r.slice(0,3).some(c=>excelOrDate(c))) dates++; });
   const hasJango=rows.some(r=>String(r.join("")).replace(/\s+/g,"").includes("잔고수량"));
   return dates>=2 && !hasJango;
@@ -551,6 +551,26 @@ function excelOrDate(v){
 function parseTxRows(rows){
   const norm=s=>String(s).replace(/\s+/g,"");
   const num=v=>{const n=parseFloat(String(v).replace(/[^0-9.\-]/g,""));return isNaN(n)?0:n;};
+  const trades=[], cashflows=[];
+  // ── 해외 거래 형식(한 줄=한 거래): 헤더에 '매매구분' ─────────────
+  const fhp=rows.findIndex(r=>r.some(c=>norm(c)==="매매구분"));
+  if(fhp>=0){
+    const FH=(rows[fhp]||[]).map(norm);
+    const fi=(...ns)=>{for(const n of ns){const i=FH.indexOf(n);if(i>=0)return i;}return -1;};
+    const cDate=fi("매매일자","거래일자"),cType=fi("매매구분","매매유형"),cMkt=fi("시장"),
+          cName=fi("종목명"),cQty=fi("수량"),cPrice=fi("단가"),cFee=fi("수수료"),cTax=fi("제세금","세금");
+    const curOf=m=>{m=String(m||"");return /타이완|대만|TWD/i.test(m)?"TWD":/미국|나스닥|뉴욕|NYSE|NASDAQ|USD/i.test(m)?"USD":/홍콩|HKD/i.test(m)?"HKD":/일본|도쿄|JPY/i.test(m)?"JPY":"USD";};
+    for(let i=fhp+1;i<rows.length;i++){
+      const R=rows[i]; const desc=norm(R[cType]);
+      if(!/매수|매도/.test(desc)) continue;
+      const name=String(R[cName]||"").trim(), qty=num(R[cQty]); if(!name||!qty) continue;
+      trades.push({date:excelOrDate(R[cDate]),type:/매수/.test(desc)?"매수":"매도",
+        code:name, name, qty, price:num(R[cPrice]), cur:curOf(R[cMkt]),
+        fee:num(R[cFee])+num(R[cTax]), seq:String(i)});
+    }
+    return {trades,cashflows};
+  }
+  // ── 국내 형식(헤더 2줄 + 2줄=1거래) ──────────────────────────
   let hp=rows.findIndex(r=>r.some(c=>{const n=norm(c);return n==="거래일자"||n==="거래종류"||n==="거래적요";}));
   if(hp<0) hp=0;
   const HP=(rows[hp]||[]).map(norm), HQ=(rows[hp+1]||[]).map(norm);
@@ -565,7 +585,6 @@ function parseTxRows(rows){
   let [nR,nC]=both("종목명"); if(nC<0){nR=1;nC=3;}
   let [pR,pC]=both("단가"); if(pC<0){pR=1;pC=4;}
   let [fR,fC]=both("제세금","세금"); if(fC<0){fR=pR;fC=pC+1;}   // 못 찾으면 단가 옆 칸
-  const trades=[], cashflows=[];
   for(let i=hp+1;i<rows.length;i++){
     const P=rows[i];
     const desc=norm(P[typeCol]);
