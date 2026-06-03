@@ -22,36 +22,39 @@ def _decode(path):
     return raw.decode("utf-8", "ignore")
 
 def load_stocks():
-    best = None
+    # 폴더의 '잔고 CSV'를 모두 읽어 종목을 합칩니다(계좌가 여러 개여도 OK).
+    files = []
     for path in glob.glob("*.csv"):
         try:
             head = next(csvmod.reader(io.StringIO(_decode(path))))
             head = [h.replace(" ", "").replace("\n", "") for h in head]
             if "잔고수량" in head or ("수량" in head and "매입단가" in head):  # 잔고/양식 파일만
-                m = os.path.getmtime(path)
-                if not best or m > best[0]: best = (m, path, head)
+                files.append((path, head))
         except Exception: continue
-    if not best:
+    if not files:
         print("  보유 CSV 없음 → 기본 종목 사용")
         return {"005930": "삼성전자", "000660": "SK하이닉스", "080220": "제주반도체"}
-    _, path, head = best
-    rows = list(csvmod.reader(io.StringIO(_decode(path))))
-    def fi(*ns):
-        for n in ns:
-            if n in head: return head.index(n)
-        return -1
-    iC, iN, iQ, iMkt = fi("종목코드"), fi("종목명"), fi("잔고수량", "수량"), fi("시장")
     out = {}
-    for c in rows[1:]:
-        if len(c) <= max(iC, iQ): continue
-        code = str(c[iC]).strip().lstrip("Aa")
-        if not code: continue
-        try: q = float(str(c[iQ]).replace(",", ""))
-        except ValueError: q = 0
-        if not q: continue
-        if iMkt >= 0 and c[iMkt] and "해외" in c[iMkt]: continue   # 해외는 네이버 국내시세 대상 아님
-        out[code] = (c[iN] if iN >= 0 else code).strip()
-    print(f"  '{path}' 에서 {len(out)}종목 읽음")
+    for path, head in files:
+        rows = list(csvmod.reader(io.StringIO(_decode(path))))
+        def fi(*ns):
+            for n in ns:
+                if n in head: return head.index(n)
+            return -1
+        iC, iN, iQ, iMkt = fi("종목코드"), fi("종목명"), fi("잔고수량", "수량"), fi("시장")
+        if iC < 0 or iQ < 0: continue
+        cnt = 0
+        for c in rows[1:]:
+            if len(c) <= max(iC, iQ): continue
+            code = str(c[iC]).strip().lstrip("Aa")
+            if not code: continue
+            try: q = float(str(c[iQ]).replace(",", ""))
+            except ValueError: q = 0
+            if not q: continue
+            if iMkt >= 0 and len(c) > iMkt and c[iMkt] and "해외" in c[iMkt]: continue   # 해외는 네이버 국내시세 대상 아님
+            out[code] = (c[iN] if iN >= 0 and len(c) > iN else code).strip()
+            cnt += 1
+        print(f"  '{path}' 에서 {cnt}종목 읽음")
     return out or {"005930": "삼성전자"}
 
 # ---------- 네이버 시세 ----------

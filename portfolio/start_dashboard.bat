@@ -1,12 +1,23 @@
 @echo off
-REM 포트폴리오 대시보드 실행 스크립트 (Windows)
+chcp 65001 >nul
 cd /d "%~dp0"
 
-echo [1/2] 시세 받아오는 중... (prices.json 생성)
-python fetch_prices.py
+REM Pick python command (python or py)
+where python >nul 2>nul && (set PY=python) || (set PY=py)
 
-echo [2/2] 대시보드 주소: http://localhost:8000/portfolio_dashboard.html
+echo [1/2] Fetching prices...  (prices.json)
+%PY% fetch_prices.py
+
+echo [2/2] Starting local web server on http://localhost:8000
+start "portfolio-server" %PY% -m http.server 8000
+
+REM give the server a moment, then open the dashboard in the browser
+timeout /t 2 >nul
 start "" "http://localhost:8000/portfolio_dashboard.html"
 
-echo 웹서버 시작 (종료: Ctrl+C)
-python -m http.server 8000
+echo.
+echo Dashboard opened in your browser:
+echo   http://localhost:8000/portfolio_dashboard.html
+echo.
+echo To STOP: close the "portfolio-server" window.
+pause
