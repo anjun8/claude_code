@@ -322,18 +322,26 @@ def index_daily(name):  # 'KOSPI' / 'KOSDAQ'
         print(f"    지수 과거 실패 {name}: {type(e).__name__}")
         return {}
 
-def stooq_daily(start, end):  # S&P500 (^spx) {yyyy-mm-dd: close}
-    try:
-        url = f"https://stooq.com/q/d/l/?s=%5Espx&d1={start.replace('-','')}&d2={end.replace('-','')}&i=d"
-        txt = requests.get(url, headers=HDR, timeout=15).text.strip()
-        out = {}
-        for line in txt.splitlines()[1:]:
-            p = line.split(",")
-            if len(p) >= 5 and p[0][:4].isdigit(): out[p[0]] = float(p[4])
-        return out
-    except Exception as e:
-        print(f"    S&P 실패: {type(e).__name__}")
-        return {}
+def stooq_daily(start, end):  # S&P500 {yyyy-mm-dd: close}
+    # 1) 폴더의 snp.csv / sp500.csv 등 우선
+    f = _index_from_files(["snp", "sp500", "s&p", "spx", "에스앤피"])
+    if f: return {d: v for d, v in f.items() if start <= d <= end}
+    # 2) Stooq (심볼/UA 여러 가지 시도)
+    for sym in ("^spx", "^gspc"):
+        try:
+            url = f"https://stooq.com/q/d/l/?s={sym}&i=d"
+            txt = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20).text.strip()
+            out = {}
+            for line in txt.splitlines()[1:]:
+                p = line.split(",")
+                if len(p) >= 5 and len(p[0]) == 10 and p[0][:4].isdigit() and start <= p[0] <= end:
+                    try: out[p[0]] = float(p[4])
+                    except ValueError: pass
+            if out: return out
+            print(f"    S&P Stooq 빈응답({sym}): {txt[:70]!r}")
+        except Exception as e:
+            print(f"    S&P 실패({sym}): {type(e).__name__}")
+    return {}
 
 def build_series(trades, cash, today):
     import bisect
