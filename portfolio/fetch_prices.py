@@ -322,15 +322,27 @@ def index_daily(name):  # 'KOSPI' / 'KOSDAQ'
         print(f"    지수 과거 실패 {name}: {type(e).__name__}")
         return {}
 
-def stooq_daily(start, end):  # S&P500 {yyyy-mm-dd: close}
+def spx_daily(start, end):  # S&P500 {yyyy-mm-dd: close}
     # 1) 폴더의 snp.csv / sp500.csv 등 우선
     f = _index_from_files(["snp", "sp500", "s&p", "spx", "에스앤피"])
     if f: return {d: v for d, v in f.items() if start <= d <= end}
-    # 2) Stooq (심볼/UA 여러 가지 시도)
+    # 2) Yahoo Finance (^GSPC)
+    try:
+        j = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=2y&interval=1d",
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=15).json()
+        res = j["chart"]["result"][0]; ts = res["timestamp"]; cl = res["indicators"]["quote"][0]["close"]
+        out = {}
+        for t, c in zip(ts, cl):
+            if c is None: continue
+            d = datetime.datetime.utcfromtimestamp(t).strftime("%Y-%m-%d")
+            if start <= d <= end: out[d] = float(c)
+        if out: return out
+    except Exception as e:
+        print(f"    S&P Yahoo 실패: {type(e).__name__}")
+    # 3) Stooq fallback
     for sym in ("^spx", "^gspc"):
         try:
-            url = f"https://stooq.com/q/d/l/?s={sym}&i=d"
-            txt = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20).text.strip()
+            txt = requests.get(f"https://stooq.com/q/d/l/?s={sym}&i=d", headers={"User-Agent": "Mozilla/5.0"}, timeout=20).text.strip()
             out = {}
             for line in txt.splitlines()[1:]:
                 p = line.split(",")
@@ -338,10 +350,38 @@ def stooq_daily(start, end):  # S&P500 {yyyy-mm-dd: close}
                     try: out[p[0]] = float(p[4])
                     except ValueError: pass
             if out: return out
-            print(f"    S&P Stooq 빈응답({sym}): {txt[:70]!r}")
         except Exception as e:
-            print(f"    S&P 실패({sym}): {type(e).__name__}")
+            print(f"    S&P Stooq 실패({sym}): {type(e).__name__}")
     return {}
+
+def get_fx_naver():  # 네이버 환율 {USD, TWD}
+    out = {}
+    for cur, sym in (("USD", "FX_USDKRW"), ("TWD", "FX_TWDKRW")):
+        try:
+            d = requests.get(f"https://api.stock.naver.com/marketindex/exchange/{sym}", headers=HDR, timeout=10).json()
+            v = float(str(d.get("closePrice", "")).replace(",", "") or 0)
+            if v: out[cur] = round(v, 2)
+        except Exception as e:
+            print(f"    환율 실패 {cur}: {type(e).__name__}")
+    return out
+
+def naver_sector(code):  # 종목 업종/섹터명 (best-effort)
+    try:
+        j = requests.get(f"https://m.stock.naver.com/api/stock/{code}/integration", headers=HDR, timeout=8).json()
+    except Exception:
+        return ""
+    found = [""]
+    def walk(o):
+        if found[0]: return
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if isinstance(v, str) and v.strip() and ("industry" in k.lower() or "sector" in k.lower() or "업종" in k):
+                    found[0] = v.strip(); return
+                walk(v)
+        elif isinstance(o, list):
+            for x in o: walk(x)
+    walk(j)
+    return found[0]
 
 def build_series(trades, cash, today):
     import bisect
@@ -351,7 +391,7 @@ def build_series(trades, cash, today):
     codes = sorted({t["code"] for t in trades})
     print(f"  과거 일별 종가 받는 중... ({len(codes)}종목, {start}~{end})")
     phist = {code: naver_daily(code, start.replace("-", ""), end.replace("-", "")) for code in codes}
-    kospi = index_daily("KOSPI"); kosdaq = index_daily("KOSDAQ"); spx = stooq_daily(start, end)
+    kospi = index_daily("KOSPI"); kosdaq = index_daily("KOSDAQ"); spx = spx_daily(start, end)
     print(f"  지수/벤치마크: 코스피 {len(kospi)}일 · 코스닥 {len(kosdaq)}일 · S&P {len(spx)}일")
     daysset = set()
     for h in phist.values(): daysset |= set(h.keys())
@@ -405,7 +445,16 @@ ks = naver_index("KOSPI"); kq = naver_index("KOSDAQ")
 if ks: result["_kospi"] = ks; print(f"  코스피: {ks:,.2f}")
 if kq: result["_kosdaq"] = kq; print(f"  코스닥: {kq:,.2f}")
 
-fx = get_fx()
+print("섹터 정보 받는 중...")
+_secn = 0
+for _code in [c for c in result if not c.startswith("_")]:
+    if not _code.isdigit(): continue          # 국내 종목코드만
+    sec = naver_sector(_code)
+    if sec: result[_code]["sector"] = sec; _secn += 1
+print(f"  섹터 {_secn}종목 확인")
+
+print("환율 받는 중...")
+fx = {**get_fx(), **get_fx_naver()}            # 네이버 우선, 없으면 수출입은행
 if fx: result["_fx"] = fx; print(f"  환율: {fx}")
 
 print("과거 시세로 자산추이 재구성 중...")
