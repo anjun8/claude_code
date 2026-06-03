@@ -113,8 +113,13 @@ function compute(){
 /* ===================== 차트(SVG/CSS) ===================== */
 const PIE=["#e0b35c","#5b9bd5","#e07a5f","#81b29a","#c77dff","#f2a65e","#6c8ead","#9aa0a6"];
 function donut(items){ // items:[{label,value,color}]
-  const tot=items.reduce((a,x)=>a+x.value,0)||1; let ang=-90; const R=88,r=50,cx=100,cy=100; let p="";
-  items.forEach(it=>{const a0=ang, a1=ang+it.value/tot*360; ang=a1;
+  const live=items.filter(x=>x.value>0); const R=88,r=50,cx=100,cy=100;
+  if(live.length<=1){   // 항목이 하나면 360° 호가 안 그려지므로 꽉 찬 도넛 링으로
+    const col=live[0]?live[0].color:'var(--border)';
+    return `<svg viewBox="0 0 200 200" width="100%" height="200"><circle cx="${cx}" cy="${cy}" r="${R}" fill="${col}"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--panel)"/></svg>`;
+  }
+  const tot=live.reduce((a,x)=>a+x.value,0)||1; let ang=-90; let p="";
+  items.forEach(it=>{ if(it.value<=0) return; const a0=ang, a1=ang+it.value/tot*360; ang=a1;
     const rad=d=>d*Math.PI/180;
     const x0=cx+R*Math.cos(rad(a0)),y0=cy+R*Math.sin(rad(a0)),x1=cx+R*Math.cos(rad(a1)),y1=cy+R*Math.sin(rad(a1));
     const xi0=cx+r*Math.cos(rad(a1)),yi0=cy+r*Math.sin(rad(a1)),xi1=cx+r*Math.cos(rad(a0)),yi1=cy+r*Math.sin(rad(a0));
@@ -226,7 +231,9 @@ function benchData(){   // 올해 YTD. 내 포트는 입출금 영향을 뺀 원
 function render(){
   const d=compute();
   const sel=S.account||"";
-  const accts=[...new Set(S.rows.map(x=>x.account||"기본"))];
+  const acctOrder=S.acctOrder||[];
+  const accts=[...new Set(S.rows.map(x=>x.account||"기본"))]
+    .sort((a,b)=>{const ia=acctOrder.indexOf(a),ib=acctOrder.indexOf(b);return (ia<0?999:ia)-(ib<0?999:ib);});
   const txAll=S.txlog||[];
   const txShown=sel?txAll.filter(t=>(t.account||"기본")===sel):txAll;
   // 매매일지 필터(종목검색/연·월) — 항상 주별로 구분
@@ -270,7 +277,10 @@ function render(){
       <button class="pbtn ${sel===''?'on':''}" data-acct="__ALL__">전체(합산)</button>
       ${accts.map(a=>`<button class="pbtn ${sel===a?'on':''}" data-acct="${a}">${a}</button>`).join("")}
     </div>
-    ${sel?`<button class="btn" data-delacct="${sel}" style="border-color:var(--up);color:var(--up);padding:7px 11px">✕ '${sel}' 계좌 삭제</button>`:""}
+    ${sel?`<span style="font-size:11px;color:var(--faint)">순서</span>
+      <button class="btn" data-acctmove="left" title="왼쪽으로" style="padding:6px 9px">◀</button>
+      <button class="btn" data-acctmove="right" title="오른쪽으로" style="padding:6px 9px">▶</button>
+      <button class="btn" data-delacct="${sel}" style="border-color:var(--up);color:var(--up);padding:7px 11px">✕ '${sel}' 삭제</button>`:""}
   </div>`:"";
   const calc=(()=>{const s=d.r.find(x=>x.code===S.calcCode)||d.r[0];if(!s)return null;
     const tv=d.totalAsset*(S.calcWeight/100), ts=tv/(s.priceK||1), diff=ts-s.qty;
@@ -444,6 +454,15 @@ function render(){
 }
 
 /* ===================== 동작 ===================== */
+function moveAcct(acct,dir){
+  const all=[...new Set(S.rows.map(x=>x.account||"기본"))];
+  let order=(S.acctOrder||[]).filter(a=>all.includes(a));
+  all.forEach(a=>{if(!order.includes(a))order.push(a);});   // 빠진 계좌 끝에 보충
+  const i=order.indexOf(acct), j=dir==="left"?i-1:i+1;
+  if(i<0||j<0||j>=order.length) return;
+  [order[i],order[j]]=[order[j],order[i]];
+  S.acctOrder=order; save(); render();
+}
 function up(code,field,val){
   if(field==="sector"){ S.rows.forEach(r=>{if(r.code===code)r.sector=val;}); save();render(); return; }   // 같은 종목 전 계좌에 적용
   const r=S.rows.find(x=>x.code===code);if(r){r[field]=val===""?"":+val;save();render();}}
@@ -835,6 +854,7 @@ app.addEventListener("click",e=>{const t=e.target;
   else if(t.dataset.tdel!==undefined){S.trades.splice(+t.dataset.tdel,1);save();render();}
   else if(t.dataset.period){S.period=t.dataset.period;save();render();}
   else if(t.dataset.acct!==undefined){S.account=t.dataset.acct==="__ALL__"?"":t.dataset.acct;save();render();}
+  else if(t.dataset.acctmove&&S.account){moveAcct(S.account,t.dataset.acctmove);}
   else if(t.dataset.delacct!==undefined){const a=t.dataset.delacct;
     if(confirm("'"+a+"' 계좌를 삭제할까요?\n이 계좌의 보유종목과 거래내역이 모두 지워집니다. (다른 계좌는 그대로)")){
       S.rows=(S.rows||[]).filter(r=>(r.account||"기본")!==a);
