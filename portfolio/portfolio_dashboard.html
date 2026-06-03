@@ -460,9 +460,11 @@ function parseTxRows(rows){
   let [fR,fC]=both("제세금","세금"); if(fC<0){fR=pR;fC=pC+1;}   // 못 찾으면 단가 옆 칸
   const trades=[], cashflows=[];
   for(let i=hp+1;i<rows.length;i++){
-    const P=rows[i]; const date=excelOrDate(P[dateCol]); if(!date) continue;   // 날짜 줄 = 거래 시작줄
-    const Q=rows[i+1]||[];
+    const P=rows[i];
     const desc=norm(P[typeCol]);
+    if(!/매수|매도|입금|출금/.test(desc)) continue;   // 거래적요로 거래 줄 식별 (날짜가 깨져도 인식)
+    const Q=rows[i+1]||[];
+    const date=excelOrDate(P[dateCol]);               // 날짜 못 읽으면 "" (보유 계산엔 지장 없음)
     const seq=String(P[noCol]||i).replace(/[^0-9]/g,"")||String(i);
     if(/매수|매도/.test(desc)){
       const type=/매수/.test(desc)?"매수":"매도";
