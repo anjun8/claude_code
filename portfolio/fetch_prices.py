@@ -365,13 +365,32 @@ def get_fx_naver():  # 네이버 환율 {USD, TWD}
             print(f"    환율 실패 {cur}: {type(e).__name__}")
     return out
 
-def naver_sector(code):  # 종목 업종명(한글) — 네이버 종목 메인 페이지의 업종 링크에서 추출
+def naver_sector(code):  # 종목 업종명(한글)
+    # 1) finance.naver 종목 메인 페이지의 업종 링크
     try:
         html = requests.get(f"https://finance.naver.com/item/main.naver?code={code}",
                             headers=HDR, timeout=8).content.decode("euc-kr", "ignore")
-        m = _re.search(r'type=upjong[^>]*>([^<]+)</a>', html)
-        if m:
-            return _re.sub(r"\s+", " ", m.group(1)).strip()
+        for pat in (r'type=upjong[^>]*>([^<]+)</a>', r'sise_group_detail[^>]*upjong[^>]*>([^<]+)</a>'):
+            m = _re.search(pat, html)
+            if m and _re.search(r'[가-힣]', m.group(1)):
+                return _re.sub(r"\s+", " ", m.group(1)).strip()
+    except Exception as e:
+        print(f"      (섹터 html 실패 {code}: {type(e).__name__})")
+    # 2) m.stock 통합 API에서 한글 업종 필드
+    try:
+        j = requests.get(f"https://m.stock.naver.com/api/stock/{code}/integration", headers=HDR, timeout=8).json()
+        found = [""]
+        def walk(o):
+            if found[0]: return
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    if isinstance(v, str) and _re.search(r'[가-힣]', v) and ("industry" in k.lower() or "sector" in k.lower() or "업종" in k):
+                        found[0] = v.strip(); return
+                    walk(v)
+            elif isinstance(o, list):
+                for x in o: walk(x)
+        walk(j)
+        if found[0]: return found[0]
     except Exception:
         pass
     return ""
@@ -443,6 +462,7 @@ _secn = 0
 for _code in [c for c in result if not c.startswith("_")]:
     if not _code.isdigit(): continue          # 국내 종목코드만
     sec = naver_sector(_code)
+    print(f"  {result[_code].get('name', _code)}({_code}): {sec or '(못찾음)'}")
     if sec: result[_code]["sector"] = sec; _secn += 1
 print(f"  섹터 {_secn}종목 확인")
 

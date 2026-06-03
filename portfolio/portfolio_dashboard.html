@@ -233,8 +233,8 @@ function render(){
   const accts=[...new Set(S.rows.map(x=>x.account||"기본"))];
   const txAll=S.txlog||[];
   const txShown=sel?txAll.filter(t=>(t.account||"기본")===sel):txAll;
-  // 매매일지 필터(종목검색/연·월) + 묶기(주별/월별)
-  const txStock=(S._txStock||"").trim(), txYear=S._txYear||"", txMon=S._txMon||"", txGroup=S._txGroup||"none";
+  // 매매일지 필터(종목검색/연·월) — 항상 주별로 구분
+  const txStock=(S._txStock||"").trim(), txYear=S._txYear||"", txMon=S._txMon||"";
   const txNames=[...new Set(txShown.map(t=>t.name).filter(Boolean))].sort();
   const txYears=[...new Set(txShown.map(t=>(t.date||"").slice(0,4)).filter(y=>/^\d{4}$/.test(y)))].sort().reverse();
   const txFiltered=txShown.filter(t=>
@@ -242,24 +242,23 @@ function render(){
     && (!txYear || (t.date||"").slice(0,4)===txYear)
     && (!txMon || (t.date||"").slice(5,7)===txMon));
   const weekKey=ds=>{const dt=new Date(ds);if(isNaN(dt))return ds||"(날짜없음)";const o=new Date(dt);const day=(dt.getDay()+6)%7;o.setDate(dt.getDate()-day);return o.toISOString().slice(0,10)+" 주";};
-  const groupKey=t=> txGroup==="month"?((t.date||"").slice(0,7)||"(날짜없음)") : txGroup==="week"?weekKey(t.date) : null;
+  const groupKey=t=>weekKey(t.date);
   const txCtrl=`<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
     <input id="txStock" list="txStockList" value="${txStock.replace(/"/g,'&quot;')}" placeholder="🔍 종목 검색" style="width:140px;font-family:'Pretendard'">
     <datalist id="txStockList">${txNames.map(n=>`<option value="${String(n).replace(/"/g,'&quot;')}">`).join("")}</datalist>
     <select id="txYear"><option value="">전체 연도</option>${txYears.map(y=>`<option value="${y}" ${y===txYear?'selected':''}>${y}년</option>`).join("")}</select>
     <select id="txMon"><option value="">전체 월</option>${Array.from({length:12},(_,i)=>("0"+(i+1)).slice(-2)).map(m=>`<option value="${m}" ${m===txMon?'selected':''}>${+m}월</option>`).join("")}</select>
-    <select id="txGroup"><option value="none" ${txGroup==='none'?'selected':''}>묶기 없음</option><option value="week" ${txGroup==='week'?'selected':''}>주별 묶기</option><option value="month" ${txGroup==='month'?'selected':''}>월별 묶기</option></select>
     ${(txStock||txYear||txMon)?`<button class="btn" id="txClear" style="padding:5px 10px">필터 해제</button>`:""}
   </div>`;
-  // tbody rows (그룹 헤더 포함). 최신순.
+  // tbody rows (주별 그룹 헤더 포함). 최신순.
   const txRowsArr=txFiltered.slice().reverse();
   let txBody="", lastG=null;
   txRowsArr.forEach(t=>{
-    if(txGroup!=="none"){ const g=groupKey(t); if(g!==lastG){ lastG=g;
+    const g=groupKey(t); if(g!==lastG){ lastG=g;
       const inG=txFiltered.filter(x=>groupKey(x)===g);
       const buy=inG.filter(x=>x.type==="매수").reduce((a,x)=>a+(+x.qty||0)*(+x.price||0),0);
       const sell=inG.filter(x=>x.type==="매도").reduce((a,x)=>a+(+x.qty||0)*(+x.price||0),0);
-      txBody+=`<tr><td colspan="6" style="background:var(--panel2);font-weight:600;font-size:12px;color:var(--gold);padding:6px 10px">${g} · ${inG.length}건 · 매수 ${won(buy)} / 매도 ${won(sell)}</td></tr>`; } }
+      txBody+=`<tr><td colspan="6" style="background:var(--panel2);font-weight:600;font-size:12px;color:var(--gold);padding:6px 10px">${g} · ${inG.length}건 · 매수 ${won(buy)} / 매도 ${won(sell)}</td></tr>`; }
     txBody+=`<tr>
       <td class="mono" style="color:var(--faint);font-size:12px">${t.date||"-"}</td>
       <td style="color:${t.type==='매수'?'var(--up)':'var(--down)'};font-weight:600">${t.type}</td>
@@ -812,7 +811,6 @@ app.addEventListener("change",e=>{const t=e.target;
   else if(t.id==="txStock"){S._txStock=t.value;render();}
   else if(t.id==="txYear"){S._txYear=t.value;render();}
   else if(t.id==="txMon"){S._txMon=t.value;render();}
-  else if(t.id==="txGroup"){S._txGroup=t.value;render();}
 });
 app.addEventListener("click",e=>{const t=e.target;
   if(t.dataset.del){if(confirm("삭제할까요?")){S.rows=S.rows.filter(x=>x.code!==t.dataset.del);save();render();}}
