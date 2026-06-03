@@ -7,7 +7,9 @@
 #  [사용법]  python fetch_prices.py   (또는 start_dashboard.bat 더블클릭)
 # =========================================================
 
-import requests, json, datetime, glob, os, csv as csvmod, io
+import requests, json, datetime, glob, os, csv as csvmod, io, sys
+try: sys.stdout.reconfigure(encoding="utf-8"); sys.stderr.reconfigure(encoding="utf-8")   # 윈도우 콘솔/로그 한글·이모지 깨짐 방지
+except Exception: pass
 
 EXIM_KEY = ""   # (선택) 수출입은행 환율 인증키. 비우면 환율은 건너뜀.
 # (선택) 구글 시트 Apps Script 웹앱 URL(…/exec). 넣으면 폴더에 CSV가 없어도 시트의 모든 탭에서
@@ -334,7 +336,7 @@ def spx_daily(start, end):  # S&P500 {yyyy-mm-dd: close}
         out = {}
         for t, c in zip(ts, cl):
             if c is None: continue
-            d = datetime.datetime.utcfromtimestamp(t).strftime("%Y-%m-%d")
+            d = datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%d")
             if start <= d <= end: out[d] = float(c)
         if out: return out
     except Exception as e:
@@ -357,23 +359,29 @@ def spx_daily(start, end):  # S&P500 {yyyy-mm-dd: close}
 def get_fx_naver():  # 네이버 환율 {USD, TWD}
     out = {}
     for cur, sym in (("USD", "FX_USDKRW"), ("TWD", "FX_TWDKRW")):
-        try:
-            d = requests.get(f"https://api.stock.naver.com/marketindex/exchange/{sym}", headers=HDR, timeout=10).json()
-            v = float(str(d.get("closePrice", "")).replace(",", "") or 0)
-            if v: out[cur] = round(v, 2)
-        except Exception as e:
-            print(f"    환율 실패 {cur}: {type(e).__name__}")
+        for url in (f"https://polling.finance.naver.com/api/realtime/marketindex/exchange/{sym}",
+                    f"https://api.stock.naver.com/marketindex/exchange/{sym}"):
+            try:
+                j = requests.get(url, headers=HDR, timeout=10).json()
+                d = j["datas"][0] if isinstance(j, dict) and j.get("datas") else j
+                v = float(str(d.get("closePrice", "")).replace(",", "") or 0)
+                if v: out[cur] = round(v, 2); break
+            except Exception:
+                continue
+        if cur not in out: print(f"    환율 {cur} 못받음")
     return out
 
 def naver_sector(code):  # 종목 업종명(한글)
-    # 1) finance.naver 종목 메인 페이지의 업종 링크
+    # 1) finance.naver 종목 메인 페이지의 업종 링크 (인코딩 자동 판별: 한글 매칭되는 쪽 사용)
     try:
-        html = requests.get(f"https://finance.naver.com/item/main.naver?code={code}",
-                            headers=HDR, timeout=6).content.decode("euc-kr", "ignore")
-        for pat in (r'type=upjong[^>]*>([^<]+)</a>', r'sise_group_detail[^>]*upjong[^>]*>([^<]+)</a>'):
-            m = _re.search(pat, html)
-            if m and _re.search(r'[가-힣]', m.group(1)):
-                return _re.sub(r"\s+", " ", m.group(1)).strip()
+        raw = requests.get(f"https://finance.naver.com/item/main.naver?code={code}", headers=HDR, timeout=6).content
+        for enc in ("utf-8", "euc-kr", "cp949"):
+            try: html = raw.decode(enc)
+            except Exception: continue
+            for pat in (r'type=upjong[^>]*>([^<]+)</a>', r'sise_group_detail[^>]*upjong[^>]*>([^<]+)</a>'):
+                m = _re.search(pat, html)
+                if m and _re.search(r'[가-힣]', m.group(1)):   # 올바로 디코딩된 경우만 한글이 잡힘
+                    return _re.sub(r"\s+", " ", m.group(1)).strip()
     except Exception as e:
         print(f"      (섹터 html 실패 {code}: {type(e).__name__})")
     # 2) m.stock 통합 API에서 한글 업종 필드
@@ -482,7 +490,7 @@ try:
     _series = build_series(_trades, _cash, datetime.date.today())
     if _series:
         result["_series"] = _series
-        print(f"  ✅ 자산추이 {len(_series)}일 재구성 (최근 총자산 약 {_series[-1]['asset']:,}원)")
+        print(f"  [OK] 자산추이 {len(_series)}일 재구성 (최근 총자산 약 {_series[-1]['asset']:,}원)")
     else:
         print("  거래내역이 없어 자산추이 생략 (시트연결/CSV 확인)")
 except Exception as e:
@@ -492,5 +500,5 @@ result["_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 with open("prices.json", "w", encoding="utf-8") as f:
     json.dump(result, f, ensure_ascii=False, indent=2)
 print("=========================================")
-print("✅ prices.json 저장 완료!")
+print("[OK] prices.json 저장 완료!")
 print("=========================================")
