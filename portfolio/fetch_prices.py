@@ -261,6 +261,75 @@ def load_all_tx():
             continue
     return trades, cash
 
+# ---------- 해외 종목: 보유분 추출 + Yahoo Finance 시세 ----------
+def _parse_foreign(rows):
+    """해외 거래(매매구분 1줄=1거래) → 현재 순보유 [{name, ticker, cur}]."""
+    norm = lambda s: _re.sub(r"\s+", "", str(s))
+    fhp = next((i for i, r in enumerate(rows) if any(norm(c) == "매매구분" for c in r)), -1)
+    if fhp < 0: return []
+    FH = [norm(c) for c in rows[fhp]]
+    def fi(*ns):
+        for n in ns:
+            if n in FH: return FH.index(n)
+        return -1
+    cType, cName, cMkt, cQty = fi("매매구분"), fi("종목명"), fi("시장"), fi("수량")
+    cTk = fi("티커", "ticker", "symbol", "심볼")
+    def curof(m):
+        m = str(m or "")
+        if _re.search("타이완|대만|TWD", m): return "TWD"
+        if _re.search("미국|나스닥|뉴욕|NASDAQ|NYSE|USD", m, _re.I): return "USD"
+        if "홍콩" in m: return "HKD"
+        if "일본" in m or "도쿄" in m: return "JPY"
+        return "USD"
+    out = {}
+    for r in rows[fhp + 1:]:
+        desc = norm(r[cType]) if cType < len(r) else ""
+        if "매수" not in desc and "매도" not in desc: continue
+        name = str(r[cName] if cName < len(r) else "").strip()
+        if not name: continue
+        tk = str(r[cTk] if 0 <= cTk < len(r) else "").strip()
+        q = _num(r[cQty] if cQty < len(r) else 0) * (1 if "매수" in desc else -1)
+        if name not in out: out[name] = {"qty": 0, "ticker": tk, "cur": curof(r[cMkt] if cMkt < len(r) else "")}
+        out[name]["qty"] += q
+        if tk: out[name]["ticker"] = tk
+    return [{"name": n, **v} for n, v in out.items() if v["qty"] > 1e-6]
+
+def load_foreign():
+    res = {}
+    def take(rows):
+        for fh in _parse_foreign(rows): res[fh["name"]] = fh
+    if GAS_WEBAPP_URL:
+        try:
+            data = requests.get(GAS_WEBAPP_URL, headers=HDR, timeout=20).json()
+            for tab in data.get("tabs", []): take(tab.get("rows", []))
+        except Exception: pass
+    for path in glob.glob("*.csv"):
+        try: take(_rows_of(_decode(path)))
+        except Exception: continue
+    return list(res.values())
+
+def yahoo_search(name):  # 이름 → Yahoo 티커 (best-effort)
+    try:
+        j = requests.get(f"https://query2.finance.yahoo.com/v1/finance/search?q={requests.utils.quote(name)}",
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
+        for q in j.get("quotes", []):
+            if q.get("symbol"): return q["symbol"]
+    except Exception: pass
+    return ""
+
+def yahoo_quote(ticker):  # 현재가 + 한달 일별 종가
+    try:
+        j = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1mo&interval=1d",
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=12).json()
+        res = j["chart"]["result"][0]; meta = res.get("meta", {})
+        cl = [c for c in res["indicators"]["quote"][0]["close"] if c is not None]
+        price = meta.get("regularMarketPrice") or (cl[-1] if cl else None)
+        if not price: return None
+        return {"price": round(float(price), 2), "hist": [round(float(c), 2) for c in cl[-22:]], "cur": meta.get("currency", "")}
+    except Exception as e:
+        print(f"    해외시세 실패 {ticker}: {type(e).__name__}")
+        return None
+
 def naver_daily(code, start_ymd, end_ymd):
     """종목 일별 종가 {yyyy-mm-dd: close}."""
     try:
@@ -459,6 +528,16 @@ for code, name in STOCKS.items():
     if s:
         s["name"] = name; result[code] = s
         print(f"  {name}({code}): {s['price']:,}원 ({s['rate']:+.2f}%)")
+
+print("해외 시세 받는 중... (Yahoo Finance)")
+for _fh in load_foreign():
+    _tk = _fh.get("ticker") or yahoo_search(_fh["name"])
+    if not _tk:
+        print(f"  {_fh['name']}: (티커 못 찾음 — 해외 거래 탭에 '티커' 열 추가, 예: 3017.TW)"); continue
+    _q = yahoo_quote(_tk)
+    if _q:
+        result[_fh["name"]] = {"name": _fh["name"], "price": _q["price"], "hist": _q["hist"], "cur": _q["cur"]}
+        print(f"  {_fh['name']}({_tk}): {_q['price']} {_q['cur']}")
 
 print("지수 받는 중...")
 ks = naver_index("KOSPI"); kq = naver_index("KOSDAQ")
