@@ -11,9 +11,16 @@ echo [1/2] Fetching prices...  (prices.json)
 echo [2/2] Starting local web server on http://localhost:8000
 start "portfolio-server" %PY% -m http.server 8000
 
-REM give the server a moment, then open the dashboard in the browser
+REM give the server a moment, then open the dashboard in Chrome (fallback: default browser)
 timeout /t 2 >nul
-start "" "http://localhost:8000/portfolio_dashboard.html"
+set "URL=http://localhost:8000/portfolio_dashboard.html"
+set "CHROME="
+for %%P in ("%ProgramFiles%\Google\Chrome\Application\chrome.exe" "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" "%LocalAppData%\Google\Chrome\Application\chrome.exe") do if exist "%%~P" set "CHROME=%%~P"
+if defined CHROME (
+  start "" "%CHROME%" "%URL%"
+) else (
+  start "" "%URL%"
+)
 
 echo.
 echo Dashboard opened in your browser:

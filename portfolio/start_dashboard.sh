@@ -11,8 +11,16 @@ PORT=8000
 URL="http://localhost:${PORT}/portfolio_dashboard.html"
 echo "▶ 대시보드 주소: ${URL}"
 
-# 브라우저 자동 열기 (가능한 경우)
-( sleep 1; (command -v open >/dev/null && open "$URL") || (command -v xdg-open >/dev/null && xdg-open "$URL") ) >/dev/null 2>&1 &
+# 크롬으로 자동 열기 (없으면 기본 브라우저)
+open_in_chrome(){
+  if command -v google-chrome >/dev/null; then google-chrome "$URL"
+  elif command -v google-chrome-stable >/dev/null; then google-chrome-stable "$URL"
+  elif [ -d "/Applications/Google Chrome.app" ]; then open -a "Google Chrome" "$URL"
+  elif command -v open >/dev/null; then open "$URL"
+  elif command -v xdg-open >/dev/null; then xdg-open "$URL"
+  fi
+}
+( sleep 1; open_in_chrome ) >/dev/null 2>&1 &
 
 echo "▶ 웹서버 시작 (종료: Ctrl+C)"
 python3 -m http.server "$PORT"
