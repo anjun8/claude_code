@@ -73,7 +73,18 @@ const fmtP=(c,v)=>c==="KRW"?(+v).toLocaleString():(c==="USD"?"$":"NT$")+(+v).toF
 
 function compute(){
   const sel=S.account||"";
-  const src=(sel?S.rows.filter(x=>(x.account||"기본")===sel):S.rows).filter(x=>(+x.qty||0)>0);
+  let src=(sel?S.rows.filter(x=>(x.account||"기본")===sel):S.rows).filter(x=>(+x.qty||0)>0);
+  if(!sel){   // 전체(합산): 같은 종목코드를 한 줄로 합치고 평단가는 수량 가중평균
+    const m={};
+    src.forEach(x=>{const k=x.code; const q=+x.qty||0;
+      if(!m[k]){ m[k]=Object.assign({},x,{qty:0,_cs:0,account:"합산"}); }
+      m[k].qty+=q; m[k]._cs+=q*(+x.avg||0);
+      if(+x.price) m[k].price=+x.price;
+      if(+x.prev) m[k].prev=+x.prev;
+      if(x.date && (!m[k].date || x.date<m[k].date)) m[k].date=x.date;   // 최초 매수일
+    });
+    src=Object.values(m).map(x=>{ x.avg=x.qty?Math.round(x._cs/x.qty):0; delete x._cs; return x; });
+  }
   const r=src.map(raw=>{
     const s=Object.assign({},raw,{qty:+raw.qty||0,avg:+raw.avg||0,price:+raw.price||0,prev:+raw.prev||+raw.price||0});
     const k=rate(s.cur), priceK=s.price*k, avgK=s.avg*k, prevK=s.prev*k;
