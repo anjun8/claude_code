@@ -186,6 +186,168 @@ def get_fx():
         day -= datetime.timedelta(days=1)
     return {}
 
+# ---------- 과거 시세 재구성 엔진 (자산추이/월별요약용) ----------
+def _date_str(v):
+    s = str(v).strip()
+    if _re.match(r"^\d+(\.\d+)?$", s):
+        n = float(s)
+        if 40000 <= n <= 80000:
+            return (datetime.date(1899, 12, 30) + datetime.timedelta(days=int(n))).isoformat()
+        return ""
+    m = _re.match(r"^(\d{4})[.\-/]\s?(\d{1,2})[.\-/]\s?(\d{1,2})", s)
+    return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}" if m else ""
+
+def _parse_tx_full(rows):
+    """거래내역 rows → (trades, cashflows). 헤더 이름으로 컬럼 탐지(형식 무관)."""
+    norm = lambda s: _re.sub(r"\s+", "", str(s))
+    hp = next((i for i, r in enumerate(rows) if any(norm(c) in ("거래일자", "거래종류", "거래적요") for c in r)), 0)
+    HP = [norm(c) for c in rows[hp]] if hp < len(rows) else []
+    HQ = [norm(c) for c in rows[hp + 1]] if hp + 1 < len(rows) else []
+    def ih(h, *ns):
+        for n in ns:
+            if n in h: return h.index(n)
+        return -1
+    def both(*ns):
+        i = ih(HP, *ns)
+        if i >= 0: return (0, i)
+        i = ih(HQ, *ns); return (1, i) if i >= 0 else (-1, -1)
+    dC = ih(HP, "거래일자"); dC = dC if dC >= 0 else 0
+    tC = ih(HP, "거래적요", "거래종류", "거래구분", "적요"); tC = tC if tC >= 0 else 2
+    qC = ih(HP, "수량"); qC = qC if qC >= 0 else 4
+    aC = ih(HP, "거래금액"); aC = aC if aC >= 0 else 7
+    cR, cC = both("종목코드");  cC = cC if cC >= 0 else 3; cR = cR if cR >= 0 else 0
+    pR, pC = both("단가");      pC = pC if pC >= 0 else 4; pR = pR if pR >= 0 else 1
+    fR, fC = both("제세금", "세금")
+    if fC < 0: fR, fC = pR, pC + 1
+    trades, cash = [], []
+    for i, P in enumerate(rows):
+        if i < hp + 1: continue
+        desc = norm(P[tC]) if tC < len(P) else ""
+        if not any(k in desc for k in ("매수", "매도", "입금", "출금")): continue
+        Q = rows[i + 1] if i + 1 < len(rows) else [""] * 40
+        date = _date_str(P[dC] if dC < len(P) else "")
+        if "매수" in desc or "매도" in desc:
+            rc = Q if cR else P; rp = Q if pR else P; rf = Q if fR else P
+            code = str(rc[cC] if cC < len(rc) else "").strip().lstrip("Aa")
+            qty = _num(P[qC] if qC < len(P) else 0)
+            if not code or not qty: continue
+            trades.append({"date": date, "type": "매수" if "매수" in desc else "매도", "code": code,
+                           "qty": qty, "price": _num(rp[pC] if pC < len(rp) else 0),
+                           "fee": _num(rf[fC] if fC < len(rf) else 0)})
+        else:
+            amt = _num(P[aC] if aC < len(P) else 0) * (-1 if "출금" in desc else 1)
+            if amt: cash.append({"date": date, "amount": amt})
+    return trades, cash
+
+def load_all_tx():
+    trades, cash = [], []
+    if GAS_WEBAPP_URL:
+        try:
+            data = requests.get(GAS_WEBAPP_URL, headers=HDR, timeout=20).json()
+            for tab in data.get("tabs", []):
+                rows = tab.get("rows", [])
+                if _is_tx(rows):
+                    t, c = _parse_tx_full(rows); trades += t; cash += c
+        except Exception as e:
+            print(f"  [시트] 거래내역 읽기 실패: {type(e).__name__}")
+    for path in glob.glob("*.csv"):
+        try:
+            rows = _rows_of(_decode(path))
+            if _is_tx(rows):
+                t, c = _parse_tx_full(rows); trades += t; cash += c
+        except Exception:
+            continue
+    return trades, cash
+
+def naver_daily(code, start_ymd, end_ymd):
+    """종목 일별 종가 {yyyy-mm-dd: close}."""
+    try:
+        url = (f"https://api.finance.naver.com/siseJson.naver?symbol={code}"
+               f"&requestType=1&startTime={start_ymd}&endTime={end_ymd}&timeframe=day")
+        txt = requests.get(url, headers=HDR, timeout=15).text.strip()
+        arr = json.loads(txt.replace("'", '"'))
+        out = {}
+        for row in arr[1:]:
+            ds = str(row[0])
+            if len(ds) == 8 and ds.isdigit():
+                out[f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"] = float(row[4])
+        return out
+    except Exception as e:
+        print(f"    과거시세 실패 {code}: {type(e).__name__}")
+        return {}
+
+def index_daily(name):  # 'KOSPI' / 'KOSDAQ'
+    out = {}
+    try:
+        for page in range(1, 8):
+            url = f"https://m.stock.naver.com/api/index/{name}/price?pageSize=100&page={page}"
+            arr = requests.get(url, headers=HDR, timeout=15).json()
+            if not arr: break
+            for d in arr:
+                ds = _re.sub(r"[./]", "-", str(d.get("localTradedAt", ""))[:10])
+                cp = float(str(d.get("closePrice", "0")).replace(",", "") or 0)
+                if _re.match(r"\d{4}-\d{2}-\d{2}", ds) and cp: out[ds] = cp
+    except Exception as e:
+        print(f"    지수 과거 실패 {name}: {type(e).__name__}")
+    return out
+
+def stooq_daily(start, end):  # S&P500 (^spx) {yyyy-mm-dd: close}
+    try:
+        url = f"https://stooq.com/q/d/l/?s=%5Espx&d1={start.replace('-','')}&d2={end.replace('-','')}&i=d"
+        txt = requests.get(url, headers=HDR, timeout=15).text.strip()
+        out = {}
+        for line in txt.splitlines()[1:]:
+            p = line.split(",")
+            if len(p) >= 5 and p[0][:4].isdigit(): out[p[0]] = float(p[4])
+        return out
+    except Exception as e:
+        print(f"    S&P 실패: {type(e).__name__}")
+        return {}
+
+def build_series(trades, cash, today):
+    import bisect
+    alldates = [t["date"] for t in trades if t["date"]] + [c["date"] for c in cash if c["date"]]
+    if not alldates: return []
+    start = min(alldates); end = today.isoformat()
+    codes = sorted({t["code"] for t in trades})
+    print(f"  과거 일별 종가 받는 중... ({len(codes)}종목, {start}~{end})")
+    phist = {code: naver_daily(code, start.replace("-", ""), end.replace("-", "")) for code in codes}
+    kospi = index_daily("KOSPI"); kosdaq = index_daily("KOSDAQ"); spx = stooq_daily(start, end)
+    daysset = set()
+    for h in phist.values(): daysset |= set(h.keys())
+    daysset |= set(kospi.keys())
+    days = sorted(d for d in daysset if start <= d <= end)
+    if not days: return []
+    def ffill(hist):
+        sk = sorted(hist.keys()); out = {}
+        for d in days:
+            idx = bisect.bisect_right(sk, d) - 1
+            out[d] = hist[sk[idx]] if idx >= 0 else None
+        return out
+    pf = {code: ffill(h) for code, h in phist.items()}
+    kf, qf, sf = ffill(kospi), ffill(kosdaq), ffill(spx)
+    events = [(t["date"] or start, "t", t) for t in trades] + [(c["date"] or start, "c", c) for c in cash]
+    events.sort(key=lambda x: x[0])
+    holdings, cashbal, ei, series = {}, 0.0, 0, []
+    for day in days:
+        while ei < len(events) and events[ei][0] <= day:
+            kind, ev = events[ei][1], events[ei][2]
+            if kind == "t":
+                if ev["type"] == "매수":
+                    holdings[ev["code"]] = holdings.get(ev["code"], 0) + ev["qty"]; cashbal -= ev["qty"] * ev["price"] + ev["fee"]
+                else:
+                    holdings[ev["code"]] = holdings.get(ev["code"], 0) - ev["qty"]; cashbal += ev["qty"] * ev["price"] - ev["fee"]
+            else:
+                cashbal += ev["amount"]
+            ei += 1
+        stockval = sum(q * pf[code][day] for code, q in holdings.items() if q > 1e-6 and pf.get(code, {}).get(day))
+        rec = {"d": day, "asset": round(stockval + cashbal)}
+        if kf.get(day): rec["kospi"] = kf[day]
+        if qf.get(day): rec["kosdaq"] = qf[day]
+        if sf.get(day): rec["spx"] = sf[day]
+        series.append(rec)
+    return series
+
 # ---------- 실행 ----------
 print("보유종목 읽는 중...")
 STOCKS = load_stocks()
@@ -205,6 +367,18 @@ if kq: result["_kosdaq"] = kq; print(f"  코스닥: {kq:,.2f}")
 
 fx = get_fx()
 if fx: result["_fx"] = fx; print(f"  환율: {fx}")
+
+print("과거 시세로 자산추이 재구성 중...")
+try:
+    _trades, _cash = load_all_tx()
+    _series = build_series(_trades, _cash, datetime.date.today())
+    if _series:
+        result["_series"] = _series
+        print(f"  ✅ 자산추이 {len(_series)}일 재구성 (최근 총자산 약 {_series[-1]['asset']:,}원)")
+    else:
+        print("  거래내역이 없어 자산추이 생략 (시트연결/CSV 확인)")
+except Exception as e:
+    print(f"  자산추이 재구성 실패: {type(e).__name__}: {e}")
 
 result["_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 with open("prices.json", "w", encoding="utf-8") as f:

@@ -163,9 +163,11 @@ function benchData(){
   if(hk.length>=2) out.push({name:"코스피(종합)",v:(hk[hk.length-1].kospi/hk[0].kospi-1)*100});
   else out.push({name:"코스피(종합)",v:null});
   const hq=h.filter(x=>x.kosdaq);
-  if(hq.length>=2) out.push({name:"코스닥150",v:(hq[hq.length-1].kosdaq/hq[0].kosdaq-1)*100});
-  else out.push({name:"코스닥150",v:null});
-  out.push({name:"S&P 500",v:(S.spxYtd!==""&&!isNaN(+S.spxYtd))?+S.spxYtd:null});
+  if(hq.length>=2) out.push({name:"코스닥",v:(hq[hq.length-1].kosdaq/hq[0].kosdaq-1)*100});
+  else out.push({name:"코스닥",v:null});
+  const hs=h.filter(x=>x.spx);
+  if(hs.length>=2) out.push({name:"S&P 500",v:(hs[hs.length-1].spx/hs[0].spx-1)*100});      // 자동(시세 재구성)
+  else out.push({name:"S&P 500",v:(S.spxYtd!==""&&!isNaN(+S.spxYtd))?+S.spxYtd:null});       // 없으면 수동 입력값
   return out;
 }
 
@@ -413,10 +415,17 @@ async function refreshPrices(){
     }
     const kospi=data._kospi&&+data._kospi||null;
     const kosdaq=data._kosdaq&&+data._kosdaq||null;
-    const _a=S.account; S.account=""; const fullAsset=compute().totalAsset; S.account=_a;
-    recordHistory(fullAsset, kospi, kosdaq);
+    let serNote="";
+    if(Array.isArray(data._series)&&data._series.length){
+      // 과거 시세로 재구성한 일별 총자산(코스피/코스닥/S&P 포함)을 자산추이로 사용
+      S.history=data._series.map(x=>({d:x.d,asset:x.asset,kospi:x.kospi||null,kosdaq:x.kosdaq||null,spx:x.spx||null}));
+      serNote=` · 자산추이 ${data._series.length}일 재구성`;
+    }else{
+      const _a=S.account; S.account=""; const fullAsset=compute().totalAsset; S.account=_a;
+      recordHistory(fullAsset, kospi, kosdaq);
+    }
     const benchNote=(kospi||kosdaq)?" · 지수 기록됨":"";
-    S.pricedAt=(data._updated||new Date().toLocaleString("ko-KR"))+`  (${hit}종목 갱신${fxNote}${benchNote})`;
+    S.pricedAt=(data._updated||new Date().toLocaleString("ko-KR"))+`  (${hit}종목 갱신${fxNote}${benchNote}${serNote})`;
     save();render();
   }catch(e){
     alert("prices.json 을 못 읽었어요.\n\n① fetch_prices.py 를 먼저 실행해 prices.json 을 만들었는지\n② 이 페이지를 'python -m http.server' 로 띄웠는지\n확인해주세요. (그냥 더블클릭으로 열면 브라우저 보안 때문에 파일을 못 읽습니다)");
