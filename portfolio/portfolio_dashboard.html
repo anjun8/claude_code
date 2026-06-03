@@ -745,8 +745,20 @@ async function loadFromSheets(){
     gsSetup(); return;
   }
   const tabs=(data&&data.tabs)||[];
+  // '시세'/'현재가' 탭은 거래가 아니라 현재가 표(GOOGLEFINANCE 등) → 따로 처리
+  const isPriceTab=tb=>/시세|현재가|price/i.test(tb.name||"");
+  const priceMap=(()=>{ const pm={};
+    tabs.filter(isPriceTab).forEach(tb=>{ const rows=tb.rows||[]; if(!rows.length)return;
+      const hdr=(rows[0]||[]).map(c=>String(c));
+      const ni=hdr.findIndex(c=>/종목명|종목|name/i.test(c));
+      const ci=hdr.findIndex(c=>/코드|code|티커|ticker/i.test(c));
+      const pi=hdr.findIndex(c=>/현재가|가격|시세|price|close/i.test(c));
+      rows.slice(1).forEach(r=>{ const pv=pi>=0?parseFloat(String(r[pi]).replace(/[^0-9.\-]/g,"")):0; if(!pv)return;
+        const nm=ni>=0?String(r[ni]).trim():"", cd=ci>=0?String(r[ci]).trim().replace(/^[Aa]/,""):"";
+        if(nm)pm[nm]=pv; if(cd)pm[cd]=pv; }); });
+    return pm; })();
   const allTx=[], allCf=[], accts=[], skipped=[];
-  tabs.forEach(tb=>{
+  tabs.filter(tb=>!isPriceTab(tb)).forEach(tb=>{
     const acct=(tb.name||"기본").trim()||"기본";
     if(!tb.rows||!looksLikeTx(tb.rows)){ skipped.push(acct); return; }   // 거래내역처럼 안 생긴 탭은 건너뜀
     accts.push(acct);
@@ -767,8 +779,11 @@ async function loadFromSheets(){
       +"\n\n이 [진단] 내용을 그대로 복사해서 알려주시면 바로 고쳐드려요."); return; }
   allTx.sort((a,b)=>a.date<b.date?-1:1); allCf.sort((a,b)=>a.date<b.date?-1:1);
   S.txlog=allTx; S.cashlog=allCf; S.rows=holdingsFromTx();
+  let pn=0;
+  S.rows.forEach(r=>{ const v=priceMap[r.name]||priceMap[r.code]; if(v){ r.price=v; r.prev=v; pn++; } });   // '시세' 탭(구글파이낸스) 현재가 반영
   save(); render();
-  alert("시트에서 매매 "+allTx.length+"건·입출금 "+allCf.length+"건을 불러와 보유종목을 계산했어요.\n계좌(탭): "+accts.join(", ")+"\n\n'↻ 시세 새로고침'으로 현재가를 채우세요.");
+  alert("시트에서 매매 "+allTx.length+"건·입출금 "+allCf.length+"건을 불러와 보유종목을 계산했어요.\n계좌(탭): "+accts.join(", ")
+    +(pn?"\n'시세' 탭에서 현재가 "+pn+"종목 반영":"")+"\n\n국내 종목 현재가는 '↻ 시세 새로고침'으로 채워요.");
 }
 
 /* ===================== 구글 시트 백업 (Apps Script 웹앱) ===================== */
