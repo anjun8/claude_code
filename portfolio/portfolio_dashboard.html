@@ -103,7 +103,7 @@ function compute(){
   const dayPl=r.reduce((a,x)=>a+x.dayPl,0);
   const realizedPl=realizedFromLog(sel);
   r.forEach(x=>{x.weight=x.evalAmt/totalAsset*100;});
-  const sec={}; r.forEach(x=>sec[x.sector]=(sec[x.sector]||0)+x.evalAmt);
+  const sec={}; r.forEach(x=>{const sn=(!x.sector||/^\d+$/.test(String(x.sector)))?"기타":x.sector; sec[sn]=(sec[sn]||0)+x.evalAmt;});
   const sectors=Object.entries(sec).map(([n,v])=>({n,v,w:v/(stockVal||1)*100})).sort((a,b)=>b.v-a.v);
   const dom=r.filter(x=>x.market==="국내").reduce((a,x)=>a+x.evalAmt,0);
   return {r,stockVal,totalCost,totalAsset,totalPl,totalPlPct,dayPl,realizedPl,sectors,dom,ovs:stockVal-dom};
