@@ -5,8 +5,9 @@ cd /d "%~dp0"
 REM Pick python command (python or py)
 where python >nul 2>nul && (set PY=python) || (set PY=py)
 
-echo [1/2] Fetching prices...  (prices.json)
-%PY% fetch_prices.py
+echo [1/2] Fetching prices...  (prices.json)  [log: fetch_log.txt]
+%PY% fetch_prices.py > fetch_log.txt 2>&1
+type fetch_log.txt
 
 echo [2/2] Starting local web server on http://localhost:8000
 start "portfolio-server" %PY% -m http.server 8000

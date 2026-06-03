@@ -369,7 +369,7 @@ def naver_sector(code):  # 종목 업종명(한글)
     # 1) finance.naver 종목 메인 페이지의 업종 링크
     try:
         html = requests.get(f"https://finance.naver.com/item/main.naver?code={code}",
-                            headers=HDR, timeout=8).content.decode("euc-kr", "ignore")
+                            headers=HDR, timeout=6).content.decode("euc-kr", "ignore")
         for pat in (r'type=upjong[^>]*>([^<]+)</a>', r'sise_group_detail[^>]*upjong[^>]*>([^<]+)</a>'):
             m = _re.search(pat, html)
             if m and _re.search(r'[가-힣]', m.group(1)):
@@ -458,12 +458,18 @@ if ks: result["_kospi"] = ks; print(f"  코스피: {ks:,.2f}")
 if kq: result["_kosdaq"] = kq; print(f"  코스닥: {kq:,.2f}")
 
 print("섹터 정보 받는 중...")
-_secn = 0
-for _code in [c for c in result if not c.startswith("_")]:
-    if not _code.isdigit(): continue          # 국내 종목코드만
-    sec = naver_sector(_code)
-    print(f"  {result[_code].get('name', _code)}({_code}): {sec or '(못찾음)'}")
-    if sec: result[_code]["sector"] = sec; _secn += 1
+_secn = _fail = 0
+try:
+    for _code in [c for c in result if not c.startswith("_")]:
+        if not _code.isdigit(): continue          # 국내 종목코드만
+        sec = naver_sector(_code)
+        print(f"  {result[_code].get('name', _code)}({_code}): {sec or '(못찾음)'}")
+        if sec: result[_code]["sector"] = sec; _secn += 1
+        else: _fail += 1
+        if _fail >= 5 and _secn == 0:             # 연속 실패 = 접근 차단 → 중단
+            print("  (섹터 소스 접근 불가 → 섹터 건너뜀)"); break
+except Exception as e:
+    print(f"  섹터 수집 중단: {type(e).__name__}")
 print(f"  섹터 {_secn}종목 확인")
 
 print("환율 받는 중...")
