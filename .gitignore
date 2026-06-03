@@ -6,3 +6,8 @@ __pycache__/
 venv/
 *.egg-info/
 .DS_Store
+
+# 포트폴리오 대시보드: 개인 데이터/생성 파일은 커밋하지 않음
+portfolio/prices.json
+portfolio/*.csv
+portfolio/portfolio_backup.json
