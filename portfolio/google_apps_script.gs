@@ -47,6 +47,7 @@ function doPost(e) {
  */
 function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = ss.getSpreadsheetTimeZone();
   var reserved = { '보유종목': 1, '거래내역': 1, '자산추이': 1, '입출금': 1, '월별요약': 1, '정보': 1 };
   var tabs = [];
   ss.getSheets().forEach(function (sh) {
@@ -54,7 +55,16 @@ function doGet(e) {
     if (reserved[name]) return;
     var rng = sh.getDataRange();
     if (rng.getNumRows() < 2) return;
-    tabs.push({ name: name, rows: rng.getDisplayValues() });   // 표시값(날짜 등은 보이는 문자열로)
+    // 표시값(getDisplayValues)은 칸이 좁으면 "#######"로 나오므로 '실제 값'을 사용.
+    // 날짜 셀은 yyyy-MM-dd 문자열로 변환, 나머지는 그대로.
+    var rows = rng.getValues().map(function (r) {
+      return r.map(function (v) {
+        if (Object.prototype.toString.call(v) === '[object Date]')
+          return Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+        return v;
+      });
+    });
+    tabs.push({ name: name, rows: rows });
   });
   var out = JSON.stringify({ tabs: tabs });
   // 브라우저는 CORS 때문에 JSONP(callback)로 호출함
